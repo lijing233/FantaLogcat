@@ -144,4 +144,38 @@ final class LogcatParserTests: XCTestCase {
         XCTAssertEqual(emitted.first?.rawText.utf8.count, 16)
         XCTAssertEqual((emitted + tail).map(\.rawText).joined(), String(repeating: "A", count: 17))
     }
+
+    func testOversizedMalformedUTF8AlwaysMakesForwardProgress() async {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar, maxLineBytes: 16)
+
+        let emitted = await parser.consume(
+            Data(repeating: 0x80, count: 17),
+            receivedAt: FixtureFactory.referenceDate
+        )
+
+        XCTAssertEqual(emitted.count, 1)
+        XCTAssertEqual(emitted.first?.parseStatus, .partial)
+        XCTAssertFalse(emitted.first?.rawText.isEmpty ?? true)
+    }
+
+    func testInvalidHeaderDoesNotMergeIntoPendingValidEvent() async {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
+        let input = """
+        08-11 12:00:00.123  42  43 I Unity: valid
+        02-31 12:00:00.123  42  43 E Unity: impossible
+
+        """
+
+        let emitted = await parser.consume(
+            Data(input.utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+        let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+        let events = emitted + tail
+
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events.map(\.parseStatus), [.complete, .raw])
+        XCTAssertEqual(events.first?.message, "valid")
+        XCTAssertEqual(events.last?.rawText, "02-31 12:00:00.123  42  43 E Unity: impossible")
+    }
 }

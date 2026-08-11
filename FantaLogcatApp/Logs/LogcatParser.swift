@@ -33,6 +33,12 @@ actor LogcatParser {
         }
     }
 
+    private enum HeaderParseResult {
+        case valid(PendingEvent)
+        case invalid
+        case notHeader
+    }
+
     private static let headerPattern = #"^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+(.*?)\s*:\s(.*)$"#
 
     private let calendar: Calendar
@@ -89,29 +95,27 @@ actor LogcatParser {
     }
 
     private func process(_ line: String, receivedAt: Date, into emitted: inout [LogEvent]) {
-        if let parsed = parseHeader(line, receivedAt: receivedAt) {
+        switch parseHeader(line, receivedAt: receivedAt) {
+        case .valid(let parsed):
             if let pending {
                 emitted.append(pending.event)
             }
             pending = parsed
             nextID += 1
             return
+        case .invalid:
+            if let pending {
+                emitted.append(pending.event)
+            }
+            pending = rawPendingEvent(line, receivedAt: receivedAt)
+            nextID += 1
+            return
+        case .notHeader:
+            break
         }
 
         if pending == nil {
-            pending = PendingEvent(
-                id: nextID,
-                deviceTimestamp: nil,
-                receivedAt: receivedAt,
-                pid: nil,
-                tid: nil,
-                priority: .unknown,
-                androidTag: nil,
-                businessTag: nil,
-                message: line,
-                rawText: line,
-                parseStatus: .raw
-            )
+            pending = rawPendingEvent(line, receivedAt: receivedAt)
             nextID += 1
         } else {
             pending?.message += "\n" + line
@@ -125,6 +129,9 @@ actor LogcatParser {
             let boundary = byteRemainder.index(byteRemainder.startIndex, offsetBy: length)
             if byteRemainder[boundary] & 0xC0 != 0x80 { break }
             length -= 1
+        }
+        if length == 0 {
+            length = maxLineBytes
         }
 
         let boundary = byteRemainder.index(byteRemainder.startIndex, offsetBy: length)
@@ -153,10 +160,26 @@ actor LogcatParser {
         nextID += 1
     }
 
-    private func parseHeader(_ line: String, receivedAt: Date) -> PendingEvent? {
+    private func rawPendingEvent(_ line: String, receivedAt: Date) -> PendingEvent {
+        PendingEvent(
+            id: nextID,
+            deviceTimestamp: nil,
+            receivedAt: receivedAt,
+            pid: nil,
+            tid: nil,
+            priority: .unknown,
+            androidTag: nil,
+            businessTag: nil,
+            message: line,
+            rawText: line,
+            parseStatus: .raw
+        )
+    }
+
+    private func parseHeader(_ line: String, receivedAt: Date) -> HeaderParseResult {
         let fullRange = NSRange(line.startIndex..<line.endIndex, in: line)
         guard let match = headerExpression.firstMatch(in: line, range: fullRange) else {
-            return nil
+            return .notHeader
         }
 
         func capture(_ index: Int) -> String {
@@ -175,9 +198,9 @@ actor LogcatParser {
             millisecond: Int(capture(6))!,
             receivedAt: receivedAt
         ) else {
-            return nil
+            return .invalid
         }
-        return PendingEvent(
+        return .valid(PendingEvent(
             id: nextID,
             deviceTimestamp: deviceTimestamp,
             receivedAt: receivedAt,
@@ -189,7 +212,7 @@ actor LogcatParser {
             message: message,
             rawText: line,
             parseStatus: .complete
-        )
+        ))
     }
 
     private func timestamp(
