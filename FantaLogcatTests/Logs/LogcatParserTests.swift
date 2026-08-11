@@ -7,7 +7,7 @@ final class LogcatParserTests: XCTestCase {
         let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
         let raw = "08-11 12:00:00.123  42  43 E Unity   : [NetworkManager]: 请求失败\n    at Game.Update()"
         let bytes = Data((raw + "\n").utf8)
-        let split = try XCTUnwrap(bytes.firstIndex(of: 0xE8))
+        let split = try XCTUnwrap(bytes.firstIndex(of: 0xE8)) + 1
 
         let first = await parser.consume(
             Data(bytes[..<split]),
@@ -99,5 +99,49 @@ final class LogcatParserTests: XCTestCase {
         let event = try XCTUnwrap(events.first)
 
         XCTAssertNil(event.androidTag)
+    }
+
+    func testAllowsColonInsideAndroidTag() async throws {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
+        _ = await parser.consume(
+            Data("08-11 12:00:00.123  42  43 I Unity:Render: ready\n".utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+
+        let events = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+        let event = try XCTUnwrap(events.first)
+
+        XCTAssertEqual(event.androidTag, "Unity:Render")
+        XCTAssertEqual(event.message, "ready")
+    }
+
+    func testInvalidCalendarDateIsPreservedAsRaw() async throws {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
+        let raw = "02-31 12:00:00.123  42  43 I Unity: impossible"
+        _ = await parser.consume(
+            Data((raw + "\n").utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+
+        let events = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+        let event = try XCTUnwrap(events.first)
+
+        XCTAssertEqual(event.parseStatus, .raw)
+        XCTAssertNil(event.deviceTimestamp)
+        XCTAssertEqual(event.rawText, raw)
+    }
+
+    func testEmitsBoundedPartialEventForLineWithoutNewline() async {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar, maxLineBytes: 16)
+        let emitted = await parser.consume(
+            Data(repeating: 0x41, count: 17),
+            receivedAt: FixtureFactory.referenceDate
+        )
+        let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+
+        XCTAssertEqual(emitted.count, 1)
+        XCTAssertEqual(emitted.first?.parseStatus, .partial)
+        XCTAssertEqual(emitted.first?.rawText.utf8.count, 16)
+        XCTAssertEqual((emitted + tail).map(\.rawText).joined(), String(repeating: "A", count: 17))
     }
 }
