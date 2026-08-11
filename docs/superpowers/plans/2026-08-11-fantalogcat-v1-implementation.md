@@ -6,7 +6,7 @@
 
 **Architecture:** A SwiftUI application shell owns user-visible state while focused actors implement ADB control, device discovery, log parsing, bounded storage, filtering, configuration, and export. The high-volume log viewport uses AppKit virtualization; every core component is UI-independent and testable with a fake process runner and fixture streams.
 
-**Tech Stack:** Xcode 26.6, Swift 6.2 in Swift 6 language mode, SwiftUI, AppKit, Foundation, CryptoKit, XCTest/XCUITest, XcodeGen 2.46.0, GitHub Actions.
+**Tech Stack:** Xcode 26.6, Swift 6.3.3 in Swift 6 language mode, SwiftUI, AppKit, Foundation, CryptoKit, XCTest/XCUITest, XcodeGen 2.46.0, GitHub Actions.
 
 ## Global Constraints
 
@@ -33,7 +33,7 @@ swift --version
 mint version
 ```
 
-Expected: `Xcode 26.6`, Apple Swift `6.2.x`, and a working Mint installation. The current workstation reports only Command Line Tools and Swift 5.9, so implementation must pause until full Xcode 26.6 is installed and selected with `sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer`. If Mint is absent, install it with `brew install mint`. Installing software or switching Xcode requires explicit user authorization at execution time.
+Expected: `Xcode 26.6`, Apple Swift `6.3.3`, and a working Mint installation. This workstation has Xcode 26.6 selected at `/Applications/Xcode.app/Contents/Developer`, its license accepted, and first-launch setup complete. If Mint is absent, install it with `brew install mint`. Installing software or switching Xcode requires explicit user authorization at execution time.
 
 ## Planned File Structure
 
@@ -1142,7 +1142,7 @@ Define `ReleaseChecking.check(currentVersion:) async throws -> ReleaseStatus` an
 
 - [ ] **Step 10: Add project governance and license files**
 
-Use the unmodified Apache License 2.0 text in `LICENSE`. `NOTICE` attributes ADB/AOSP references without claiming Google endorsement. `SECURITY.md` defines private vulnerability reporting and supported versions. `README.md` states macOS 13+/arm64, unsigned-build Gatekeeper steps through System Settings, managed ADB download behavior, privacy model, and known 1.0 limits. `CONTRIBUTING.md` documents Xcode 26.6, Mint/XcodeGen, tests, configuration isolation, and commit expectations.
+Use the unmodified Apache License 2.0 text in `LICENSE`. `NOTICE` attributes ADB/AOSP references without claiming Google endorsement. `SECURITY.md` defines private vulnerability reporting and supported versions. `README.md` states macOS 13+/arm64, unsigned-build Gatekeeper steps through System Settings, managed ADB download behavior, privacy model, and known 1.0 limits. `CONTRIBUTING.md` documents Xcode 26.6 with Swift 6.3.3, Mint/XcodeGen, tests, configuration isolation, and commit expectations.
 
 - [ ] **Step 11: Run the complete release gate**
 
