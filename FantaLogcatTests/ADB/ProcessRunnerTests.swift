@@ -76,4 +76,58 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertEqual(String(decoding: stderr, as: UTF8.self), "err")
         XCTAssertEqual(exitCode, 0)
     }
+
+    func testTimeoutReturnsEvenWhenProcessIgnoresTerminate() async {
+        let runner = FoundationProcessRunner()
+        let clock = ContinuousClock()
+        let started = clock.now
+
+        do {
+            _ = try await runner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap '' TERM; while :; do :; done"],
+                timeout: .milliseconds(50)
+            )
+            XCTFail("Expected timeout")
+        } catch {
+            XCTAssertEqual(error as? ProcessRunnerError, .timedOut)
+        }
+
+        XCTAssertLessThan(started.duration(to: clock.now), .seconds(1))
+    }
+
+    func testLeavingStreamEarlyTerminatesProcessPromptly() async throws {
+        let runner = FoundationProcessRunner()
+        let stream = try runner.stream(
+            executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["5"]
+        )
+        let task = Task {
+            for try await _ in stream {}
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let clock = ContinuousClock()
+        let started = clock.now
+
+        task.cancel()
+        _ = try? await task.value
+
+        XCTAssertLessThan(started.duration(to: clock.now), .seconds(1))
+    }
+
+    func testStreamFailsExplicitlyWhenBoundedBufferOverflows() async throws {
+        let runner = FoundationProcessRunner()
+        let stream = try runner.stream(
+            executable: URL(fileURLWithPath: "/usr/bin/yes"),
+            arguments: []
+        )
+        try await Task.sleep(for: .milliseconds(200))
+
+        do {
+            for try await _ in stream {}
+            XCTFail("Expected bounded buffer overflow")
+        } catch {
+            XCTAssertEqual(error as? ProcessRunnerError, .outputBufferOverflow)
+        }
+    }
 }

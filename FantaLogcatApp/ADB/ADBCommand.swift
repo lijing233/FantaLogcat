@@ -100,4 +100,9 @@ enum ADBCommand: Sendable, Equatable {
                 + pids.map { "--pid=\($0)" }
         }
     }
+
+    var sensitiveValues: [String] {
+        guard case .pair(_, let code) = self else { return [] }
+        return [code.value]
+    }
 }

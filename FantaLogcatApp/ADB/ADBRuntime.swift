@@ -33,7 +33,11 @@ struct ADBRuntime: ADBRuntimeProtocol, Sendable {
         guard result.exitCode != 0 else { return result }
         throw ADBError.commandFailed(
             exitCode: result.exitCode,
-            stderrSummary: Self.limitedString(result.stderr, maximumBytes: maximumErrorBytes)
+            stderrSummary: Self.limitedString(
+                result.stderr,
+                redacting: command.sensitiveValues,
+                maximumBytes: maximumErrorBytes
+            )
         )
     }
 
@@ -41,9 +45,15 @@ struct ADBRuntime: ADBRuntimeProtocol, Sendable {
         try runner.stream(executable: executableURL, arguments: command.arguments)
     }
 
-    private static func limitedString(_ data: Data, maximumBytes: Int) -> String {
+    private static func limitedString(
+        _ data: Data,
+        redacting sensitiveValues: [String],
+        maximumBytes: Int
+    ) -> String {
         guard maximumBytes > 0 else { return "" }
-        let decoded = String(decoding: data, as: UTF8.self)
+        let decoded = sensitiveValues.reduce(String(decoding: data, as: UTF8.self)) { text, secret in
+            text.replacingOccurrences(of: secret, with: "<redacted>")
+        }
         var result = ""
         result.reserveCapacity(min(maximumBytes, decoded.utf8.count))
         for character in decoded {

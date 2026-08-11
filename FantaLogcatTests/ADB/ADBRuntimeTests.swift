@@ -20,7 +20,7 @@ final class ADBRuntimeTests: XCTestCase {
         let runner = FakeProcessRunner(result: .success(ProcessResult(
             exitCode: 1,
             stdout: Data(),
-            stderr: Data(String(repeating: "failure ", count: 600).utf8)
+            stderr: Data(("pairing failed for code 123456 " + String(repeating: "failure ", count: 600)).utf8)
         )))
         let runtime = ADBRuntime(
             executableURL: URL(fileURLWithPath: "/managed/adb"),

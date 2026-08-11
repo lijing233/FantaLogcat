@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 protocol ProcessRunning: Sendable {
@@ -19,9 +20,13 @@ struct ProcessResult: Sendable, Equatable {
 
 enum ProcessRunnerError: Error, Equatable {
     case timedOut
+    case outputBufferOverflow
 }
 
 final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
+    private static let streamChunkBytes = 64 * 1_024
+    private static let streamBufferChunks = 256
+
     func run(executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessResult {
         let process = Process()
         let stdoutPipe = Pipe()
@@ -57,7 +62,9 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
                 stderr: stderrTask.value
             )
         } catch {
-            processBox.terminate()
+            processBox.stopSoon(
+                closing: [stdoutPipe.fileHandleForReading, stderrPipe.fileHandleForReading]
+            )
             _ = await stdoutTask.value
             _ = await stderrTask.value
             throw error
@@ -75,46 +82,93 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
         process.arguments = arguments
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-
         let processBox = ProcessBox(process)
-        let pair = AsyncThrowingStream<ProcessOutput, Error>.makeStream()
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty { pair.continuation.yield(.stdout(data)) }
-        }
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty { pair.continuation.yield(.stderr(data)) }
-        }
-        process.terminationHandler = { process in
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
-            let stdoutTail = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrTail = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            if !stdoutTail.isEmpty { pair.continuation.yield(.stdout(stdoutTail)) }
-            if !stderrTail.isEmpty { pair.continuation.yield(.stderr(stderrTail)) }
-            pair.continuation.yield(.exited(process.terminationStatus))
-            pair.continuation.finish()
-        }
-        pair.continuation.onTermination = { @Sendable _ in
-            processBox.terminate()
-        }
+        let pair = AsyncThrowingStream<ProcessOutput, Error>.makeStream(
+            bufferingPolicy: .bufferingOldest(Self.streamBufferChunks)
+        )
 
         do {
             try process.run()
         } catch {
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            stdoutPipe.fileHandleForReading.closeFile()
+            stderrPipe.fileHandleForReading.closeFile()
             pair.continuation.finish(throwing: error)
             throw error
         }
+
+        let coordinator = Task.detached(priority: .utility) { [processBox] in
+            let handles = [stdoutPipe.fileHandleForReading, stderrPipe.fileHandleForReading]
+            let stdoutTask = Task.detached(priority: .utility) {
+                try Self.drain(
+                    stdoutPipe.fileHandleForReading,
+                    output: ProcessOutput.stdout,
+                    continuation: pair.continuation,
+                    processBox: processBox,
+                    handles: handles
+                )
+            }
+            let stderrTask = Task.detached(priority: .utility) {
+                try Self.drain(
+                    stderrPipe.fileHandleForReading,
+                    output: ProcessOutput.stderr,
+                    continuation: pair.continuation,
+                    processBox: processBox,
+                    handles: handles
+                )
+            }
+
+            do {
+                try await stdoutTask.value
+                try await stderrTask.value
+                process.waitUntilExit()
+                pair.continuation.yield(.exited(process.terminationStatus))
+                pair.continuation.finish()
+            } catch {
+                processBox.stopSoon(closing: handles)
+                _ = try? await stdoutTask.value
+                _ = try? await stderrTask.value
+                pair.continuation.finish(throwing: error)
+            }
+        }
+        pair.continuation.onTermination = { @Sendable _ in
+            coordinator.cancel()
+            processBox.stopSoon(
+                closing: [stdoutPipe.fileHandleForReading, stderrPipe.fileHandleForReading]
+            )
+        }
         return pair.stream
+    }
+
+    private static func drain(
+        _ handle: FileHandle,
+        output: (Data) -> ProcessOutput,
+        continuation: AsyncThrowingStream<ProcessOutput, Error>.Continuation,
+        processBox: ProcessBox,
+        handles: [FileHandle]
+    ) throws {
+        while true {
+            let data = try handle.read(upToCount: streamChunkBytes) ?? Data()
+            guard !data.isEmpty else { return }
+            switch continuation.yield(output(data)) {
+            case .enqueued:
+                continue
+            case .dropped:
+                processBox.stopSoon(closing: handles)
+                throw ProcessRunnerError.outputBufferOverflow
+            case .terminated:
+                return
+            @unknown default:
+                processBox.stopSoon(closing: handles)
+                throw ProcessRunnerError.outputBufferOverflow
+            }
+        }
     }
 }
 
 private final class ProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     let process: Process
+    private var stopScheduled = false
 
     init(_ process: Process) {
         self.process = process
@@ -123,6 +177,27 @@ private final class ProcessBox: @unchecked Sendable {
     func terminate() {
         lock.withLock {
             if process.isRunning { process.terminate() }
+        }
+    }
+
+    func stopSoon(closing handles: [FileHandle]) {
+        let shouldSchedule = lock.withLock {
+            guard !stopScheduled else { return false }
+            stopScheduled = true
+            if process.isRunning { process.terminate() }
+            return true
+        }
+        guard shouldSchedule else { return }
+
+        Task.detached(priority: .high) { [self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            lock.withLock {
+                if process.isRunning {
+                    Darwin.kill(process.processIdentifier, SIGKILL)
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+            handles.forEach { $0.closeFile() }
         }
     }
 }
@@ -156,22 +231,28 @@ private final class ProcessWaiter: @unchecked Sendable {
                         } catch {
                             return
                         }
-                        self?.processBox.terminate()
-                        self?.resolve(.failure(ProcessRunnerError.timedOut))
+                        guard let self else { return }
+                        if resolve(.failure(ProcessRunnerError.timedOut)) {
+                            processBox.terminate()
+                        }
                     }
                     return nil
                 }
                 if let immediate { continuation.resume(with: immediate) }
             }
         } onCancel: {
-            processBox.terminate()
-            resolve(.failure(CancellationError()))
+            if resolve(.failure(CancellationError())) {
+                processBox.terminate()
+            }
         }
     }
 
-    private func resolve(_ newResult: Result<Int32, Error>) {
+    @discardableResult
+    private func resolve(_ newResult: Result<Int32, Error>) -> Bool {
+        var didResolve = false
         let continuation: CheckedContinuation<Int32, Error>? = lock.withLock {
             guard result == nil else { return nil }
+            didResolve = true
             result = newResult
             timeoutTask?.cancel()
             timeoutTask = nil
@@ -180,5 +261,6 @@ private final class ProcessWaiter: @unchecked Sendable {
             return continuation
         }
         continuation?.resume(with: newResult)
+        return didResolve
     }
 }
