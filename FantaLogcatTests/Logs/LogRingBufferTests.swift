@@ -3,8 +3,8 @@ import XCTest
 @testable import FantaLogcat
 
 final class LogRingBufferTests: XCTestCase {
-    func testEvictsOldestEventsAtEitherLimit() async {
-        let buffer = LogRingBuffer(limits: .init(maxEvents: 2, maxTextBytes: 16))
+    func testEvictsOldestEventAtCountLimit() async {
+        let buffer = LogRingBuffer(limits: .init(maxEvents: 2, maxTextBytes: 100))
 
         let report = await buffer.append([
             .fixture(id: 1, message: "1234"),
@@ -17,6 +17,21 @@ final class LogRingBufferTests: XCTestCase {
         XCTAssertEqual(report.evictedEvents, 1)
         XCTAssertEqual(report.evictedTextBytes, 8)
         XCTAssertEqual(snapshot.totalEvictedEvents, 1)
+    }
+
+    func testEvictsOldestEventAtByteLimit() async {
+        let buffer = LogRingBuffer(limits: .init(maxEvents: 10, maxTextBytes: 16))
+
+        let report = await buffer.append([
+            .fixture(id: 1, message: "1234"),
+            .fixture(id: 2, message: "5678"),
+            .fixture(id: 3, message: "90AB")
+        ])
+        let snapshot = await buffer.snapshot(.all)
+
+        XCTAssertEqual(snapshot.events.map(\.id), [2, 3])
+        XCTAssertEqual(report.evictedEvents, 1)
+        XCTAssertEqual(report.evictedTextBytes, 8)
     }
 
     func testRetainsNewestEventWhenItAloneExceedsByteLimit() async {
@@ -73,5 +88,17 @@ final class LogRingBufferTests: XCTestCase {
         XCTAssertTrue(snapshot.events.isEmpty)
         XCTAssertEqual(snapshot.totalEvictedEvents, 0)
         XCTAssertFalse(snapshot.newestEventExceedsByteLimit)
+    }
+
+    func testSustainedEvictionPreservesNewestOrderAcrossCompaction() async {
+        let buffer = LogRingBuffer(limits: .init(maxEvents: 2, maxTextBytes: 1_000_000))
+        let events = (1...5_000).map { LogEvent.fixture(id: UInt64($0), message: "x") }
+
+        let report = await buffer.append(events)
+        let snapshot = await buffer.snapshot(.all)
+
+        XCTAssertEqual(snapshot.events.map(\.id), [4_999, 5_000])
+        XCTAssertEqual(report.evictedEvents, 4_998)
+        XCTAssertEqual(snapshot.totalEvictedEvents, 4_998)
     }
 }

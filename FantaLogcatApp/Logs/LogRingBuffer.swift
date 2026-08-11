@@ -37,7 +37,7 @@ struct LogSnapshot: Sendable {
 
 actor LogRingBuffer {
     private let limits: CacheLimits
-    private var storage: [LogEvent] = []
+    private var storage: [LogEvent?] = []
     private var firstRetainedIndex = 0
     private var textBytes = 0
     private var totalEvictedEvents = 0
@@ -47,7 +47,7 @@ actor LogRingBuffer {
     }
 
     func append(_ incoming: [LogEvent]) -> EvictionReport {
-        storage.append(contentsOf: incoming)
+        storage.append(contentsOf: incoming.map(Optional.some))
         textBytes += incoming.reduce(into: 0) { total, event in
             total += Self.textBytes(of: event)
         }
@@ -56,8 +56,9 @@ actor LogRingBuffer {
         var evictedBytes = 0
         while retainedCount > limits.maxEvents
             || (textBytes > limits.maxTextBytes && retainedCount > 1) {
-            let removed = storage[firstRetainedIndex]
+            let removed = storage[firstRetainedIndex]!
             let bytes = Self.textBytes(of: removed)
+            storage[firstRetainedIndex] = nil
             firstRetainedIndex += 1
             textBytes -= bytes
             evictedEvents += 1
@@ -74,7 +75,7 @@ actor LogRingBuffer {
     }
 
     func snapshot(_ selection: SnapshotSelection) -> LogSnapshot {
-        let retained = Array(storage[firstRetainedIndex...])
+        let retained = storage[firstRetainedIndex...].compactMap { $0 }
         let selected: [LogEvent]
         switch selection {
         case .all:
@@ -107,8 +108,7 @@ actor LogRingBuffer {
     }
 
     private func compactStorageIfNeeded() {
-        guard firstRetainedIndex >= 4_096,
-              firstRetainedIndex * 2 >= storage.count else {
+        guard firstRetainedIndex >= 4_096 else {
             return
         }
         storage = Array(storage[firstRetainedIndex...])
