@@ -1,0 +1,9 @@
+.DS_Store
+.superpowers/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+# Team-only build input. Public releases must never embed this file.
+Config/TeamConfig.json
