@@ -7,7 +7,7 @@ struct RootView: View {
         Group {
             switch model.phase {
             case .preparingADB:
-                ProgressView("Preparing Android tools…")
+                ADBPreparationView()
             case .selectingDevice:
                 Text("Select a device")
             case .selectingApp:
@@ -17,5 +17,54 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 920, minHeight: 600)
+        .task {
+            await model.prepareADB()
+        }
+    }
+}
+
+private struct ADBPreparationView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "terminal.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+
+            switch model.adbPreparation {
+            case .checking:
+                ProgressView("Checking Android tools…")
+            case .licenseRequired:
+                Text("Android tools are required")
+                    .font(.title2.weight(.semibold))
+                Text("FantaLogcat downloads the official Google Platform-Tools package (about 16 MB), verifies its SHA-256 checksum, and keeps it inside the app support folder.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 520)
+                Link("View Google license terms", destination: model.environment.adbLicenseURL)
+                Button("Accept and install") {
+                    Task { await model.installADB() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            case .installing:
+                ProgressView("Downloading and verifying Android tools…")
+                Text("Keep FantaLogcat open. The existing installation will not be replaced unless verification succeeds.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            case .failed(let code):
+                Text("Android tools could not be prepared")
+                    .font(.title2.weight(.semibold))
+                Text("Error: \(code)")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Button("Try again") {
+                    Task { await model.installADB() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(48)
     }
 }

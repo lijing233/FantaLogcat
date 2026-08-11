@@ -1,6 +1,86 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Accept and install" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接受并安装"
+          }
+        }
+      }
+    },
+    "Android tools are required" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要 Android 工具"
+          }
+        }
+      }
+    },
+    "Android tools could not be prepared" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法准备 Android 工具"
+          }
+        }
+      }
+    },
+    "Checking Android tools…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 Android 工具…"
+          }
+        }
+      }
+    },
+    "Downloading and verifying Android tools…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载并校验 Android 工具…"
+          }
+        }
+      }
+    },
+    "Error: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误：%@"
+          }
+        }
+      }
+    },
+    "FantaLogcat downloads the official Google Platform-Tools package (about 16 MB), verifies its SHA-256 checksum, and keeps it inside the app support folder." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FantaLogcat 会下载 Google 官方 Platform-Tools（约 16 MB），校验 SHA-256，并仅保存在应用支持目录中。"
+          }
+        }
+      }
+    },
+    "Keep FantaLogcat open. The existing installation will not be replaced unless verification succeeds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请保持 FantaLogcat 开启。只有校验成功后才会替换现有安装。"
+          }
+        }
+      }
+    },
     "Preparing Android tools…" : {
       "localizations" : {
         "en" : {
@@ -33,6 +113,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择应用"
+          }
+        }
+      }
+    },
+    "Try again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
+          }
+        }
+      }
+    },
+    "View Google license terms" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看 Google 许可条款"
           }
         }
       }

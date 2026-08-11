@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "platformToolsVersion": "37.0.0",
+  "downloadURL": "https://dl.google.com/android/repository/platform-tools_r37.0.0-darwin.zip",
+  "archiveBytes": 16442240,
+  "sha256": "094a1395683c509fd4d48667da0d8b5ef4d42b2abfcd29f2e8149e2f989357c7",
+  "licenseURL": "https://developer.android.com/studio/terms",
+  "verifiedAt": "2026-08-11T00:00:00Z"
+}
