@@ -45,6 +45,7 @@ final class AppModelTests: XCTestCase {
         )
         let model = AppModel(environment: .test(installer: installer))
 
+        await model.prepareADB()
         await model.installADB()
 
         XCTAssertEqual(model.phase, .selectingDevice)

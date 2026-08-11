@@ -16,11 +16,17 @@ enum ADBPreparationState: Equatable {
 
 @MainActor
 final class AppModel: ObservableObject {
+    private enum RetryOperation {
+        case check
+        case install
+    }
+
     @Published private(set) var phase: AppPhase = .preparingADB
     @Published private(set) var adbPreparation: ADBPreparationState = .checking
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
+    private var retryOperation: RetryOperation = .check
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -28,6 +34,7 @@ final class AppModel: ObservableObject {
 
     func prepareADB() async {
         guard phase == .preparingADB else { return }
+        retryOperation = .check
         adbPreparation = .checking
         do {
             let installer = try resolveInstaller()
@@ -43,7 +50,12 @@ final class AppModel: ObservableObject {
     }
 
     func installADB() async {
-        guard phase == .preparingADB else { return }
+        guard phase == .preparingADB,
+              adbPreparation == .licenseRequired
+                || (isFailed && retryOperation == .install) else {
+            return
+        }
+        retryOperation = .install
         adbPreparation = .installing
         do {
             let installer = try resolveInstaller()
@@ -51,6 +63,15 @@ final class AppModel: ObservableObject {
             phase = .selectingDevice
         } catch {
             adbPreparation = .failed(errorCode(error))
+        }
+    }
+
+    func retryADB() async {
+        switch retryOperation {
+        case .check:
+            await prepareADB()
+        case .install:
+            await installADB()
         }
     }
 
@@ -63,5 +84,10 @@ final class AppModel: ObservableObject {
 
     private func errorCode(_ error: Error) -> String {
         (error as? ADBInstallerError)?.code ?? "unexpected_error"
+    }
+
+    private var isFailed: Bool {
+        guard case .failed = adbPreparation else { return false }
+        return true
     }
 }

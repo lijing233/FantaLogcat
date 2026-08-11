@@ -41,7 +41,12 @@ enum ADBInstallerError: Error, Equatable {
 }
 
 protocol DownloadClient: Sendable {
-    func download(from url: URL, maximumBytes: Int) async throws -> Data
+    func download(from url: URL, to destination: URL, maximumBytes: Int) async throws -> DownloadReceipt
+}
+
+struct DownloadReceipt: Sendable, Equatable {
+    let byteCount: Int
+    let sha256: String
 }
 
 protocol ArchiveExtracting: Sendable {
@@ -62,6 +67,12 @@ actor ADBInstaller: ADBInstalling {
     private struct ActivePointer: Codable {
         let activeVersion: String
         let previousVersion: String?
+    }
+
+    private struct InstallationMetadata: Codable {
+        let schemaVersion: Int
+        let version: String
+        let sha256: String
     }
 
     private static let requiredPaths = [
@@ -123,18 +134,18 @@ actor ADBInstaller: ADBInstalling {
         do {
             try files.createDirectory(at: temporary, withIntermediateDirectories: true)
             let maximumBytes = Int(ceil(Double(manifest.archiveBytes) * 1.01))
-            let archive = try await downloader.download(
+            let archiveURL = temporary.appendingPathComponent("platform-tools.zip")
+            let receipt = try await downloader.download(
                 from: manifest.downloadURL,
+                to: archiveURL,
                 maximumBytes: maximumBytes
             )
-            guard archive.count <= maximumBytes else { throw ADBInstallerError.archiveTooLarge }
-            guard Self.sha256(archive) == manifest.sha256 else {
+            guard receipt.byteCount <= maximumBytes else { throw ADBInstallerError.archiveTooLarge }
+            guard receipt.sha256 == manifest.sha256 else {
                 throw ADBInstallerError.checksumMismatch
             }
 
-            let archiveURL = temporary.appendingPathComponent("platform-tools.zip")
             let candidate = temporary.appendingPathComponent("candidate", isDirectory: true)
-            try archive.write(to: archiveURL, options: .atomic)
             try files.createDirectory(at: candidate, withIntermediateDirectories: true)
             try await extractor.extractRequiredFiles(from: archiveURL, to: candidate)
             try validateCandidate(candidate)
@@ -149,6 +160,15 @@ actor ADBInstaller: ADBInstalling {
             } catch {
                 throw ADBInstallerError.verificationFailed
             }
+            let metadata = InstallationMetadata(
+                schemaVersion: 1,
+                version: manifest.platformToolsVersion,
+                sha256: manifest.sha256
+            )
+            try JSONEncoder().encode(metadata).write(
+                to: candidate.appendingPathComponent("installation.json"),
+                options: .atomic
+            )
 
             let versions = rootDirectory.appendingPathComponent("versions", isDirectory: true)
             try files.createDirectory(at: versions, withIntermediateDirectories: true)
@@ -176,6 +196,7 @@ actor ADBInstaller: ADBInstalling {
     }
 
     func rollback() throws -> ADBInstallation {
+        guard !isInstalling else { throw ADBInstallerError.installInProgress }
         guard let pointer = try? readPointer(),
               let previous = pointer.previousVersion,
               let installation = installation(for: previous) else {
@@ -193,13 +214,33 @@ actor ADBInstaller: ADBInstalling {
     }
 
     private func installation(for version: String) -> ADBInstallation? {
-        let executable = rootDirectory
-            .appendingPathComponent("versions/\(version)", isDirectory: true)
-            .appendingPathComponent("adb")
-        guard files.isExecutableFile(atPath: executable.path)
-            || files.fileExists(atPath: executable.path) else {
+        guard Self.isValidVersion(version) else { return nil }
+        let versions = rootDirectory.appendingPathComponent("versions", isDirectory: true)
+            .standardizedFileURL
+        let directory = versions.appendingPathComponent(version, isDirectory: true)
+            .standardizedFileURL
+        guard directory.path.hasPrefix(versions.path + "/"),
+              let metadataData = try? Data(contentsOf: directory.appendingPathComponent("installation.json")),
+              let metadata = try? JSONDecoder().decode(InstallationMetadata.self, from: metadataData),
+              metadata.schemaVersion == 1,
+              metadata.version == version,
+              metadata.sha256.range(
+                of: #"^[0-9a-f]{64}$"#,
+                options: .regularExpression
+              ) != nil,
+              version != manifest.platformToolsVersion || metadata.sha256 == manifest.sha256 else {
             return nil
         }
+        for relativePath in Self.requiredPaths {
+            let url = directory.appendingPathComponent(relativePath)
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true else {
+                return nil
+            }
+        }
+        let executable = directory.appendingPathComponent("adb")
+        guard files.isExecutableFile(atPath: executable.path) else { return nil }
         return ADBInstallation(version: version, executableURL: executable)
     }
 
@@ -231,19 +272,54 @@ actor ADBInstaller: ADBInstalling {
         )
     }
 
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    private static func isValidVersion(_ version: String) -> Bool {
+        version.range(
+            of: #"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$"#,
+            options: .regularExpression
+        ) != nil
     }
 }
 
 struct URLSessionDownloadClient: DownloadClient {
-    func download(from url: URL, maximumBytes: Int) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
+    let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func download(from url: URL, to destination: URL, maximumBytes: Int) async throws -> DownloadReceipt {
+        let (bytes, response) = try await session.bytes(from: url)
+        if let response = response as? HTTPURLResponse,
+           !(200...299).contains(response.statusCode) {
+            throw URLError(.badServerResponse)
+        }
         if response.expectedContentLength > Int64(maximumBytes) {
             throw ADBInstallerError.archiveTooLarge
         }
-        guard data.count <= maximumBytes else { throw ADBInstallerError.archiveTooLarge }
-        return data
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: destination)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        var buffer = Data()
+        buffer.reserveCapacity(64 * 1_024)
+        var count = 0
+
+        func flush() throws {
+            guard !buffer.isEmpty else { return }
+            hasher.update(data: buffer)
+            try handle.write(contentsOf: buffer)
+            buffer.removeAll(keepingCapacity: true)
+        }
+
+        for try await byte in bytes {
+            count += 1
+            guard count <= maximumBytes else { throw ADBInstallerError.archiveTooLarge }
+            buffer.append(byte)
+            if buffer.count == 64 * 1_024 { try flush() }
+        }
+        try flush()
+        let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return DownloadReceipt(byteCount: count, sha256: hash)
     }
 }
 

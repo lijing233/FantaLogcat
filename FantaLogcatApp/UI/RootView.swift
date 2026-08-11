@@ -60,7 +60,7 @@ private struct ADBPreparationView: View {
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Button("Try again") {
-                    Task { await model.installADB() }
+                    Task { await model.retryADB() }
                 }
                 .buttonStyle(.borderedProminent)
             }

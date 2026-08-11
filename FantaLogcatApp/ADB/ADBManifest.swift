@@ -21,7 +21,10 @@ struct ADBManifest: Codable, Sendable, Equatable {
         verifiedAt: Date
     ) {
         guard schemaVersion == Self.supportedSchemaVersion,
-              !platformToolsVersion.isEmpty,
+              platformToolsVersion.range(
+                of: #"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$"#,
+                options: .regularExpression
+              ) != nil,
               downloadURL.scheme == "https",
               downloadURL.host == "dl.google.com",
               archiveBytes > 0,
