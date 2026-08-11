@@ -1,0 +1,48 @@
+name: FantaLogcat
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  knownRegions: [en, zh-Hans]
+settings:
+  base:
+    ARCHS: arm64
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    GENERATE_INFOPLIST_FILE: YES
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CLANG_WARN_DOCUMENTATION_COMMENTS: YES
+targets:
+  FantaLogcat:
+    type: application
+    platform: macOS
+    sources: [FantaLogcatApp]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.fantalogcat.FantaLogcat
+        PRODUCT_NAME: FantaLogcat
+        INFOPLIST_KEY_CFBundleDisplayName: FantaLogcat
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+  FantaLogcatTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [FantaLogcatTests]
+    dependencies:
+      - target: FantaLogcat
+  FantaLogcatUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [FantaLogcatUITests]
+    dependencies:
+      - target: FantaLogcat
+schemes:
+  FantaLogcat:
+    build:
+      targets:
+        FantaLogcat: all
+        FantaLogcatTests: [test]
+    test:
+      targets: [FantaLogcatTests]

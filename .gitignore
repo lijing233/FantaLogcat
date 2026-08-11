@@ -1,6 +1,9 @@
 .DS_Store
 .superpowers/
 .worktrees/
+.build/
+.mint/
+FantaLogcat.xcodeproj/
 DerivedData/
 build/
 *.xcuserstate

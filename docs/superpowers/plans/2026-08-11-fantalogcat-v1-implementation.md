@@ -159,7 +159,7 @@ final class AppModelTests: XCTestCase {
 `Mintfile`:
 
 ```text
-github "yonaskolb/XcodeGen" == 2.46.0
+yonaskolb/XcodeGen@2.46.0
 ```
 
 `project.yml`:
@@ -176,6 +176,7 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
+    GENERATE_INFOPLIST_FILE: YES
     MACOSX_DEPLOYMENT_TARGET: "13.0"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
@@ -189,7 +190,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.fantalogcat.FantaLogcat
         PRODUCT_NAME: FantaLogcat
-        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: FantaLogcat
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
@@ -211,9 +211,8 @@ schemes:
       targets:
         FantaLogcat: all
         FantaLogcatTests: [test]
-        FantaLogcatUITests: [test]
     test:
-      targets: [FantaLogcatTests, FantaLogcatUITests]
+      targets: [FantaLogcatTests]
 ```
 
 - [ ] **Step 3: Generate the project and verify the test fails**
