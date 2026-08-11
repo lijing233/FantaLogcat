@@ -121,8 +121,16 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
                 try await stdoutTask.value
                 try await stderrTask.value
                 process.waitUntilExit()
-                pair.continuation.yield(.exited(process.terminationStatus))
-                pair.continuation.finish()
+                switch pair.continuation.yield(.exited(process.terminationStatus)) {
+                case .enqueued:
+                    pair.continuation.finish()
+                case .dropped:
+                    pair.continuation.finish(throwing: ProcessRunnerError.outputBufferOverflow)
+                case .terminated:
+                    break
+                @unknown default:
+                    pair.continuation.finish(throwing: ProcessRunnerError.outputBufferOverflow)
+                }
             } catch {
                 processBox.stopSoon(closing: handles)
                 _ = try? await stdoutTask.value
