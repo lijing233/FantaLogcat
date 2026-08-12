@@ -2,6 +2,8 @@
 
 FantaLogcat 是一款原生 macOS Android Logcat 查看器。连接 Android 设备、选择应用进程后，即可在 Mac 上实时查看、筛选、搜索并导出该进程的日志。
 
+[应用主页](https://lijing233.github.io/FantaLogcat/) · [下载最新版](https://github.com/lijing233/FantaLogcat/releases/latest) · [问题反馈](https://github.com/lijing233/FantaLogcat/issues)
+
 ## 界面预览
 
 ### 应用选择
