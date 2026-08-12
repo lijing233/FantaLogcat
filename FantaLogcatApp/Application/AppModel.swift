@@ -65,22 +65,25 @@ final class AppModel: ObservableObject {
     private var pendingLogTextBytes = 0
     private let keywordStore: any LogKeywordStoreProtocol
     private let appSelectionStore: any AppSelectionStoreProtocol
+    private let settingsStore: any AppSettingsStore
     private var retryOperation: RetryOperation = .check
 
     init(
         environment: AppEnvironment,
         cacheLimits: CacheLimits? = nil,
-        keywordStore: any LogKeywordStoreProtocol = UserDefaultsLogKeywordStore()
+        keywordStore: any LogKeywordStoreProtocol = UserDefaultsLogKeywordStore(),
+        settingsStore: any AppSettingsStore = UserDefaultsAppSettingsStore()
     ) {
-        let loadedCaptureSettings = LogCaptureSettings.load()
+        let settings = settingsStore.settings.normalized
         self.environment = environment
         cacheLimitsOverride = cacheLimits
-        captureSettings = loadedCaptureSettings
-        logBuffer = LogRingBuffer(limits: cacheLimits ?? loadedCaptureSettings.cacheLimits)
+        captureSettings = settings.capture
+        logBuffer = LogRingBuffer(limits: cacheLimits ?? settings.capture.cacheLimits)
         self.keywordStore = keywordStore
         savedKeywords = keywordStore.keywords
-        language = AppLanguage(rawValue: UserDefaults.standard.string(forKey: AppLanguage.storageKey) ?? "") ?? .chinese
+        language = settings.language
         appSelectionStore = environment.makeAppSelectionStore()
+        self.settingsStore = settingsStore
     }
 
     func prepareADB() async {
@@ -176,8 +179,20 @@ final class AppModel: ObservableObject {
     }
 
     func setLanguage(_ language: AppLanguage) {
-        self.language = language
-        UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.storageKey)
+        var settings = settingsDraft
+        settings.language = language
+        saveSettings(settings)
+    }
+
+    var settingsDraft: AppSettings {
+        AppSettings(language: language, capture: captureSettings)
+    }
+
+    func saveSettings(_ settings: AppSettings) {
+        let value = settings.normalized
+        language = value.language
+        captureSettings = value.capture
+        settingsStore.save(value)
     }
 
     func copy(_ chinese: String, _ english: String) -> String {
@@ -316,8 +331,9 @@ final class AppModel: ObservableObject {
     }
 
     func setCaptureSettings(_ settings: LogCaptureSettings) {
-        captureSettings = settings.normalized
-        captureSettings.save()
+        var draft = settingsDraft
+        draft.capture = settings
+        saveSettings(draft)
     }
 
     func exportText(scope: LogExportScope, redact: Bool) -> String {

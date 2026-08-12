@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testSaveSettingsAppliesAllFieldsAndPersistsOnce() {
+        let store = InMemoryAppSettingsStore(settings: .init(language: .chinese, capture: .init()))
+        let model = AppModel(environment: .test(), settingsStore: store)
+        let draft = AppSettings(language: .english, capture: .init(historyLines: 100, maxEvents: 5_000, maxTextBytes: 16 * 1_024 * 1_024, redactExportsByDefault: false))
+
+        model.saveSettings(draft)
+
+        XCTAssertEqual(model.language, .english)
+        XCTAssertEqual(model.captureSettings, draft.capture)
+        XCTAssertEqual(store.savedValues, [draft])
+    }
+
     func testNewModelStartsInPreparingADBPhase() {
         let model = AppModel(environment: .test())
 
@@ -523,5 +535,19 @@ private final class InMemoryAppSelectionStore: AppSelectionStoreProtocol, @unche
         value.recentPackageNames.removeAll { $0 == packageName }
         value.recentPackageNames.insert(packageName, at: 0)
         value.recentPackageNames = Array(value.recentPackageNames.prefix(6))
+    }
+}
+
+private final class InMemoryAppSettingsStore: AppSettingsStore, @unchecked Sendable {
+    private(set) var settings: AppSettings
+    private(set) var savedValues: [AppSettings] = []
+
+    init(settings: AppSettings) {
+        self.settings = settings
+    }
+
+    func save(_ settings: AppSettings) {
+        self.settings = settings
+        savedValues.append(settings)
     }
 }

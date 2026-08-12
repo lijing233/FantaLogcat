@@ -23,17 +23,4 @@ struct LogCaptureSettings: Codable, Equatable, Sendable {
         let value = normalized
         return CacheLimits(maxEvents: value.maxEvents, maxTextBytes: value.maxTextBytes)
     }
-
-    static func load() -> LogCaptureSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode(LogCaptureSettings.self, from: data) else {
-            return .init()
-        }
-        return decoded.normalized
-    }
-
-    func save() {
-        guard let data = try? JSONEncoder().encode(normalized) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey)
-    }
 }
