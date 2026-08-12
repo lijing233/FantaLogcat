@@ -118,6 +118,12 @@ actor ADBInstaller: ADBInstalling {
     func install(acceptingLicense: Bool) async throws -> ADBInstallation {
         guard acceptingLicense else { throw ADBInstallerError.licenseNotAccepted }
         guard !isInstalling else { throw ADBInstallerError.installInProgress }
+        let versions: URL
+        do {
+            versions = try secureVersionsDirectory()
+        } catch {
+            throw ADBInstallerError.fileOperationFailed
+        }
         if case .ready(let installation) = state(), installation.version == manifest.platformToolsVersion {
             return installation
         }
@@ -175,13 +181,21 @@ actor ADBInstaller: ADBInstalling {
                 options: .atomic
             )
 
-            let versions = rootDirectory.appendingPathComponent("versions", isDirectory: true)
-            try files.createDirectory(at: versions, withIntermediateDirectories: true)
             let destination = versions.appendingPathComponent(
                 manifest.platformToolsVersion,
                 isDirectory: true
             )
-            if files.fileExists(atPath: destination.path) {
+            let resolvedVersions = versions.resolvingSymlinksInPath().standardizedFileURL
+            let resolvedDestination = destination.resolvingSymlinksInPath().standardizedFileURL
+            guard resolvedDestination.path.hasPrefix(resolvedVersions.path + "/") else {
+                throw ADBInstallerError.fileOperationFailed
+            }
+            if files.fileExists(atPath: destination.path)
+                || Self.isSymbolicLink(destination) {
+                guard Self.isDirectoryWithoutSymlink(destination),
+                      resolvedDestination.path.hasPrefix(resolvedVersions.path + "/") else {
+                    throw ADBInstallerError.fileOperationFailed
+                }
                 try files.removeItem(at: destination)
             }
             try files.moveItem(at: candidate, to: destination)
@@ -325,6 +339,32 @@ actor ADBInstaller: ADBInstalling {
             guard isDirectoryWithoutSymlink(current) else { return false }
         }
         return true
+    }
+
+    private func secureVersionsDirectory() throws -> URL {
+        try files.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+        guard Self.isDirectoryWithoutSymlink(rootDirectory) else {
+            throw ADBInstallerError.fileOperationFailed
+        }
+        let root = rootDirectory.resolvingSymlinksInPath().standardizedFileURL
+        let versions = rootDirectory.appendingPathComponent("versions", isDirectory: true)
+        if files.fileExists(atPath: versions.path) || Self.isSymbolicLink(versions) {
+            guard Self.isDirectoryWithoutSymlink(versions) else {
+                throw ADBInstallerError.fileOperationFailed
+            }
+        } else {
+            try files.createDirectory(at: versions, withIntermediateDirectories: false)
+        }
+        let resolvedVersions = versions.resolvingSymlinksInPath().standardizedFileURL
+        guard resolvedVersions.path.hasPrefix(root.path + "/"),
+              Self.isDirectoryWithoutSymlink(versions) else {
+            throw ADBInstallerError.fileOperationFailed
+        }
+        return versions.standardizedFileURL
+    }
+
+    private static func isSymbolicLink(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
     }
 }
 

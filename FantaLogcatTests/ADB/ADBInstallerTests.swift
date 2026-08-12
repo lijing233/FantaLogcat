@@ -129,6 +129,30 @@ final class ADBInstallerTests: XCTestCase {
         XCTAssertEqual(state, .notInstalled)
     }
 
+    func testSymlinkedVersionsRootCannotWriteOutsideManagedDirectory() async throws {
+        let bytes = Data("valid archive".utf8)
+        let fixture = try InstallerFixture(downloadedBytes: bytes)
+        let versions = fixture.root.appendingPathComponent("versions")
+        let external = fixture.root.appendingPathComponent("external-versions")
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        let sentinel = external.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: sentinel)
+        try FileManager.default.createSymbolicLink(at: versions, withDestinationURL: external)
+        let installer = fixture.makeInstaller(manifest: .fixture(bytes: bytes))
+
+        do {
+            _ = try await installer.install(acceptingLicense: true)
+            XCTFail("Expected unsafe versions directory to be rejected")
+        } catch {
+            XCTAssertEqual(error as? ADBInstallerError, .fileOperationFailed)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data("keep".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: external.appendingPathComponent("37.0.0").path
+        ))
+    }
+
     func testRollbackIsRejectedWhileInstallIsSuspended() async throws {
         let bytes = Data("valid archive".utf8)
         let fixture = try InstallerFixture(existingVersion: "36.0.2", downloadedBytes: bytes)
