@@ -15,16 +15,49 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.logFilter, LogFilter())
     }
 
-    func testSaveSettingsAppliesAllFieldsAndPersistsOnce() {
+    func testSaveSettingsAppliesAllFieldsAndPersistsOnce() throws {
         let store = InMemoryAppSettingsStore(settings: .init(language: .chinese, capture: .init()))
         let model = AppModel(environment: .test(), settingsStore: store)
         let draft = AppSettings(language: .english, capture: .init(historyLines: 100, maxEvents: 5_000, maxTextBytes: 16 * 1_024 * 1_024, redactExportsByDefault: false))
 
-        model.saveSettings(draft)
+        try model.saveSettings(draft)
 
         XCTAssertEqual(model.language, .english)
         XCTAssertEqual(model.captureSettings, draft.capture)
         XCTAssertEqual(store.savedValues, [draft])
+    }
+
+    func testFailedSettingsPersistenceDoesNotPublishPartialState() {
+        let original = AppSettings(language: .chinese, capture: .init(historyLines: 100))
+        let store = InMemoryAppSettingsStore(settings: original, saveError: TestSettingsStoreError.failed)
+        let model = AppModel(environment: .test(), settingsStore: store)
+        let draft = AppSettings(
+            language: .english,
+            capture: .init(historyLines: 999, maxEvents: 1, maxTextBytes: 1, redactExportsByDefault: false)
+        )
+
+        XCTAssertThrowsError(try model.saveSettings(draft))
+
+        XCTAssertEqual(model.settingsDraft, original)
+        XCTAssertEqual(store.settings, original)
+        XCTAssertEqual(store.savedValues, [])
+    }
+
+    func testSaveSettingsPublishesOneNormalizedSettingsValue() throws {
+        let store = InMemoryAppSettingsStore(settings: .init(language: .chinese, capture: .init()))
+        let model = AppModel(environment: .test(), settingsStore: store)
+        let draft = AppSettings(
+            language: .english,
+            capture: .init(historyLines: 999, maxEvents: 1, maxTextBytes: 1, redactExportsByDefault: false)
+        )
+
+        try model.saveSettings(draft)
+
+        XCTAssertEqual(model.settingsDraft.language, .english)
+        XCTAssertEqual(model.settingsDraft.capture.historyLines, 500)
+        XCTAssertEqual(model.settingsDraft.capture.maxEvents, 1_000)
+        XCTAssertEqual(model.settingsDraft.capture.maxTextBytes, 8 * 1_024 * 1_024)
+        XCTAssertEqual(store.savedValues, [model.settingsDraft])
     }
 
     func testNewModelStartsInPreparingADBPhase() {
@@ -552,13 +585,20 @@ private final class InMemoryAppSelectionStore: AppSelectionStoreProtocol, @unche
 private final class InMemoryAppSettingsStore: AppSettingsStore, @unchecked Sendable {
     private(set) var settings: AppSettings
     private(set) var savedValues: [AppSettings] = []
+    private let saveError: Error?
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, saveError: Error? = nil) {
         self.settings = settings
+        self.saveError = saveError
     }
 
-    func save(_ settings: AppSettings) {
+    func save(_ settings: AppSettings) throws {
+        if let saveError { throw saveError }
         self.settings = settings
         savedValues.append(settings)
     }
+}
+
+private enum TestSettingsStoreError: Error {
+    case failed
 }

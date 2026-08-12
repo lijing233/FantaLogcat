@@ -47,8 +47,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLogPresentationPaused = false
     @Published private(set) var pendingLogEventCount = 0
     @Published var isShowingSettings = false
-    @Published private(set) var language: AppLanguage
-    @Published private(set) var captureSettings: LogCaptureSettings
+    @Published private(set) var settings: AppSettings
+
+    var language: AppLanguage { settings.language }
+    var captureSettings: LogCaptureSettings { settings.capture }
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
@@ -77,11 +79,10 @@ final class AppModel: ObservableObject {
         let settings = settingsStore.settings.normalized
         self.environment = environment
         cacheLimitsOverride = cacheLimits
-        captureSettings = settings.capture
+        self.settings = settings
         logBuffer = LogRingBuffer(limits: cacheLimits ?? settings.capture.cacheLimits)
         self.keywordStore = keywordStore
         savedKeywords = keywordStore.keywords
-        language = settings.language
         appSelectionStore = environment.makeAppSelectionStore()
         self.settingsStore = settingsStore
     }
@@ -178,21 +179,14 @@ final class AppModel: ObservableObject {
         catch { availableApps = [] }
     }
 
-    func setLanguage(_ language: AppLanguage) {
-        var settings = settingsDraft
-        settings.language = language
-        saveSettings(settings)
-    }
-
     var settingsDraft: AppSettings {
-        AppSettings(language: language, capture: captureSettings)
+        settings
     }
 
-    func saveSettings(_ settings: AppSettings) {
-        let value = settings.normalized
-        language = value.language
-        captureSettings = value.capture
-        settingsStore.save(value)
+    func saveSettings(_ draft: AppSettings) throws {
+        let value = draft.normalized
+        try settingsStore.save(value)
+        settings = value
     }
 
     func copy(_ chinese: String, _ english: String) -> String {
@@ -332,12 +326,6 @@ final class AppModel: ObservableObject {
     func removeSavedKeyword(_ keyword: SavedKeyword) {
         keywordStore.remove(keyword.value)
         savedKeywords = keywordStore.keywords
-    }
-
-    func setCaptureSettings(_ settings: LogCaptureSettings) {
-        var draft = settingsDraft
-        draft.capture = settings
-        saveSettings(draft)
     }
 
     func exportText(scope: LogExportScope, redact: Bool) -> String {

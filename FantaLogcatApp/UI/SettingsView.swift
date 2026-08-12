@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft: AppSettings
+    @State private var saveErrorMessage: String?
 
     init(initialDraft: AppSettings) {
         _draft = State(initialValue: initialDraft)
@@ -64,10 +65,18 @@ struct SettingsView: View {
                 copy("Redact exports by default"),
                 isOn: binding(\.redactExportsByDefault)
             )
+            .accessibilityIdentifier("settings.capture.redactExports")
 
             Text(copy("Settings apply when you next select an app. Safety ceilings are 500 history lines, 100,000 logs, and 64 MB text cache."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if let saveErrorMessage {
+                Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("settings.saveError")
+            }
 
             HStack {
                 Spacer()
@@ -106,7 +115,13 @@ struct SettingsView: View {
     }
 
     private func save() {
-        model.saveSettings(draft)
-        dismiss()
+        do {
+            try model.saveSettings(draft)
+            dismiss()
+        } catch {
+            saveErrorMessage = draft.language == .chinese
+                ? "设置保存失败，请重试。"
+                : "Could not save settings. Try again."
+        }
     }
 }

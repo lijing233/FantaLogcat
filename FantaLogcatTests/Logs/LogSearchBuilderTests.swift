@@ -47,4 +47,28 @@ final class LogSearchBuilderTests: XCTestCase {
 
         XCTAssertEqual(builder, LogSearchBuilder())
     }
+
+    func testRestoringMixedBuilderQueryRoundTripsAndAppendPreservesMeaning() throws {
+        var builder = try XCTUnwrap(LogSearchBuilder(restoringFlatQuery: "A OR B AND C"))
+
+        XCTAssertEqual(builder.keywords.map(\.value), ["A", "B", "C"])
+        XCTAssertEqual(builder.keywords.map(\.relation), [nil, .or, .and])
+        XCTAssertEqual(builder.query, "A OR B AND C")
+
+        builder.nextOperator = .or
+        builder.addKeyword("D")
+        XCTAssertEqual(builder.query, "A OR B AND C OR D")
+    }
+
+    func testRestoringFlatQueryPreservesDuplicateTerms() throws {
+        let builder = try XCTUnwrap(LogSearchBuilder(restoringFlatQuery: "Unity OR Unity AND Error"))
+
+        XCTAssertEqual(builder.keywords.map(\.value), ["Unity", "Unity", "Error"])
+        XCTAssertEqual(builder.query, "Unity OR Unity AND Error")
+    }
+
+    func testRestoringRejectsMalformedFlatQuery() {
+        XCTAssertNil(LogSearchBuilder(restoringFlatQuery: "Unity OR OR Error"))
+        XCTAssertNil(LogSearchBuilder(restoringFlatQuery: "AND Unity"))
+    }
 }

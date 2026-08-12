@@ -74,6 +74,7 @@ struct FantaLogcatApp: App {
         [
             AppLanguage.storageKey,
             LogCaptureSettings.storageKey,
+            AppSettings.storageKey,
             UserDefaultsLogKeywordStore.storageKey,
             UserDefaultsAppSelectionStore.storageKey
         ].forEach(defaults.removeObject(forKey:))
@@ -85,7 +86,14 @@ private struct UITestingSettingsHost: View {
     @State private var isShowingSettings = false
 
     var body: some View {
-        Color.clear
+        VStack(spacing: 12) {
+            Text(model.language.rawValue)
+                .accessibilityIdentifier("uiTesting.live.language.\(model.language.rawValue)")
+            Text(model.captureSettings.redactExportsByDefault ? "true" : "false")
+                .accessibilityIdentifier("uiTesting.live.redaction.\(model.captureSettings.redactExportsByDefault)")
+            Button("Open Settings") { isShowingSettings = true }
+                .accessibilityIdentifier("uiTesting.settings.reopen")
+        }
             .onAppear { isShowingSettings = true }
             .sheet(isPresented: $isShowingSettings) {
                 SettingsView(initialDraft: model.settingsDraft)
@@ -129,7 +137,7 @@ private final class UITestingLogKeywordStore: LogKeywordStoreProtocol, @unchecke
 private final class UITestingAppSettingsStore: AppSettingsStore, @unchecked Sendable {
     private(set) var settings = AppSettings(language: .chinese, capture: LogCaptureSettings())
 
-    func save(_ settings: AppSettings) {
+    func save(_ settings: AppSettings) throws {
         self.settings = settings.normalized
     }
 }

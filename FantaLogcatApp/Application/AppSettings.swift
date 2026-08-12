@@ -1,6 +1,8 @@
 import Foundation
 
-struct AppSettings: Equatable, Sendable {
+struct AppSettings: Codable, Equatable, Sendable {
+    static let storageKey = "io.github.fantalogcat.app-settings.v1"
+
     var language: AppLanguage
     var capture: LogCaptureSettings
 
@@ -11,7 +13,7 @@ struct AppSettings: Equatable, Sendable {
 
 protocol AppSettingsStore: Sendable {
     var settings: AppSettings { get }
-    func save(_ settings: AppSettings)
+    func save(_ settings: AppSettings) throws
 }
 
 final class UserDefaultsAppSettingsStore: AppSettingsStore, @unchecked Sendable {
@@ -22,18 +24,27 @@ final class UserDefaultsAppSettingsStore: AppSettingsStore, @unchecked Sendable 
     }
 
     var settings: AppSettings {
+        if let data = defaults.data(forKey: AppSettings.storageKey),
+           let value = try? JSONDecoder().decode(AppSettings.self, from: data) {
+            return value.normalized
+        }
+
         let language = AppLanguage(
             rawValue: defaults.string(forKey: AppLanguage.storageKey) ?? ""
         ) ?? .chinese
         let capture = defaults.data(forKey: LogCaptureSettings.storageKey)
             .flatMap { try? JSONDecoder().decode(LogCaptureSettings.self, from: $0) }
             ?? LogCaptureSettings()
-        return AppSettings(language: language, capture: capture).normalized
+        let migrated = AppSettings(language: language, capture: capture).normalized
+        if let data = try? JSONEncoder().encode(migrated) {
+            defaults.set(data, forKey: AppSettings.storageKey)
+        }
+        return migrated
     }
 
-    func save(_ settings: AppSettings) {
+    func save(_ settings: AppSettings) throws {
         let value = settings.normalized
-        defaults.set(value.language.rawValue, forKey: AppLanguage.storageKey)
-        defaults.set(try? JSONEncoder().encode(value.capture), forKey: LogCaptureSettings.storageKey)
+        let data = try JSONEncoder().encode(value)
+        defaults.set(data, forKey: AppSettings.storageKey)
     }
 }

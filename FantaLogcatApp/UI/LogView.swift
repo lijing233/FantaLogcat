@@ -115,33 +115,36 @@ struct LogView: View {
 
     private var filterBar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                priorityPreset(model.copy("全部日志", "All logs"), levels: [])
-                priorityPreset(model.copy("警告及以上", "Warning and above"), levels: [.warning, .error, .fatal])
-                priorityPreset(model.copy("错误及以上", "Error and above"), levels: [.error, .fatal])
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: 8) {
+                    priorityPreset(model.copy("全部日志", "All logs"), levels: [])
+                    priorityPreset(model.copy("警告及以上", "Warning and above"), levels: [.warning, .error, .fatal])
+                    priorityPreset(model.copy("错误及以上", "Error and above"), levels: [.error, .fatal])
 
-                ForEach(levels, id: \.self) { level in
-                    Button {
-                        var selected = model.logFilter.levels
-                        if selected.contains(level) {
-                            selected.remove(level)
-                        } else {
-                            selected.insert(level)
+                    ForEach(levels, id: \.self) { level in
+                        Button {
+                            var selected = model.logFilter.levels
+                            if selected.contains(level) {
+                                selected.remove(level)
+                            } else {
+                                selected.insert(level)
+                            }
+                            model.setLogLevels(selected)
+                        } label: {
+                            Label(levelLabel(level), systemImage: model.logFilter.levels.contains(level) ? "checkmark.circle.fill" : "circle")
                         }
-                        model.setLogLevels(selected)
-                    } label: {
-                        Label(levelLabel(level), systemImage: model.logFilter.levels.contains(level) ? "checkmark.circle.fill" : "circle")
+                        .buttonStyle(.bordered)
+                        .tint(model.logFilter.levels.contains(level) ? levelColor(level) : nil)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(model.logFilter.levels.contains(level) ? levelColor(level) : nil)
-                }
-                Spacer()
-                if model.isLogPresentationPaused {
-                    Label("\(model.pendingLogEventCount) \(model.copy("条新日志", "new"))", systemImage: "pause.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
+                    Spacer(minLength: 0)
+                    if model.isLogPresentationPaused {
+                        Label("\(model.pendingLogEventCount) \(model.copy("条新日志", "new"))", systemImage: "pause.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
+            .accessibilityIdentifier("logFilters.priority.scroll")
 
             LogSearchEditor(builder: $searchBuilder, clearAction: clearFilters)
         }
@@ -162,9 +165,8 @@ struct LogView: View {
     private func restoreSearchBuilderIfNeeded() {
         guard searchBuilder.keywords.isEmpty,
               !model.logFilter.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        searchBuilder = LogSearchBuilder(
-            keywords: [SelectedKeyword(value: model.logFilter.keyword, relation: nil)]
-        )
+        searchBuilder = LogSearchBuilder(restoringFlatQuery: model.logFilter.keyword)
+            ?? LogSearchBuilder(keywords: [SelectedKeyword(value: model.logFilter.keyword, relation: nil)])
     }
 
     @ViewBuilder

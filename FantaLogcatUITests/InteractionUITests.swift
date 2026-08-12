@@ -19,17 +19,22 @@ final class InteractionUITests: XCTestCase {
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
         XCTAssertTrue(waitForLanguage("english", in: language))
+        let redact = redactExportsToggle
+        XCTAssertTrue(redact.waitForExistence(timeout: 5))
+        XCTAssertEqual(redact.value as? String, "1")
+        redact.click()
+        XCTAssertEqual(redact.value as? String, "0")
 
         let close = app.buttons["settings.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.click()
 
-        app.terminate()
-        launchSettings(reset: false)
+        XCTAssertTrue(liveLanguage("chinese").waitForExistence(timeout: 5))
+        XCTAssertTrue(liveRedaction("true").waitForExistence(timeout: 5))
+        reopenSettings()
 
-        let relaunchedLanguage = languagePicker
-        XCTAssertTrue(relaunchedLanguage.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLanguage("chinese", in: relaunchedLanguage))
+        XCTAssertTrue(waitForLanguage("chinese", in: languagePicker))
+        XCTAssertEqual(redactExportsToggle.value as? String, "1")
     }
 
     func testSavingSettingsPersistsLanguageChange() {
@@ -43,17 +48,21 @@ final class InteractionUITests: XCTestCase {
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
         XCTAssertTrue(waitForLanguage("english", in: language))
+        let redact = redactExportsToggle
+        XCTAssertTrue(redact.waitForExistence(timeout: 5))
+        redact.click()
+        XCTAssertEqual(redact.value as? String, "0")
 
         let save = app.buttons["settings.save"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.click()
 
-        app.terminate()
-        launchSettings(reset: false)
+        XCTAssertTrue(liveLanguage("english").waitForExistence(timeout: 5))
+        XCTAssertTrue(liveRedaction("false").waitForExistence(timeout: 5))
+        reopenSettings()
 
-        let relaunchedLanguage = languagePicker
-        XCTAssertTrue(relaunchedLanguage.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLanguage("english", in: relaunchedLanguage))
+        XCTAssertTrue(waitForLanguage("english", in: languagePicker))
+        XCTAssertEqual(redactExportsToggle.value as? String, "0")
     }
 
     func testSearchAddAndClearUseVisibleButtons() {
@@ -96,6 +105,25 @@ final class InteractionUITests: XCTestCase {
 
     private var languagePicker: XCUIElement {
         app.descendants(matching: .any)["settings.language"]
+    }
+
+    private var redactExportsToggle: XCUIElement {
+        app.checkBoxes["settings.capture.redactExports"]
+    }
+
+    private func liveLanguage(_ value: String) -> XCUIElement {
+        app.staticTexts["uiTesting.live.language.\(value)"]
+    }
+
+    private func liveRedaction(_ value: String) -> XCUIElement {
+        app.staticTexts["uiTesting.live.redaction.\(value)"]
+    }
+
+    private func reopenSettings() {
+        let reopen = app.buttons["uiTesting.settings.reopen"]
+        XCTAssertTrue(reopen.waitForExistence(timeout: 5))
+        reopen.click()
+        XCTAssertTrue(languagePicker.waitForExistence(timeout: 5))
     }
 
     private func waitForLanguage(_ language: String, in element: XCUIElement) -> Bool {
