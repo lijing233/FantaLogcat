@@ -42,6 +42,8 @@ is_mounted=true
   printf '%s\n' 'DMG fixture check failed: background image is missing' >&2
   exit 1
 }
+[ "$(sips -g pixelWidth "$mount_point/.background/background.png" | awk '/pixelWidth/ { print $2 }')" = 760 ]
+[ "$(sips -g pixelHeight "$mount_point/.background/background.png" | awk '/pixelHeight/ { print $2 }')" = 440 ]
 [ -s "$mount_point/.DS_Store" ] || {
   printf '%s\n' 'DMG fixture check failed: Finder layout is missing' >&2
   exit 1

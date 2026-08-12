@@ -87,16 +87,16 @@ on run arguments
       set statusbar visible of dmgWindow to false
       set pathbar visible of dmgWindow to false
       set sidebar width of dmgWindow to 0
-      set bounds of dmgWindow to {180, 140, 900, 560}
+      set bounds of dmgWindow to {160, 120, 920, 560}
 
       set iconOptions to icon view options of dmgWindow
       set arrangement of iconOptions to not arranged
-      set icon size of iconOptions to 104
-      set text size of iconOptions to 14
+      set icon size of iconOptions to 92
+      set text size of iconOptions to 13
       set background picture of iconOptions to backgroundFile
 
-      set position of item "FantaLogcat.app" to {170, 190}
-      set position of item "Applications" to {550, 190}
+      set position of item "FantaLogcat.app" to {195, 230}
+      set position of item "Applications" to {565, 230}
 
       update without registering applications
       delay 2
