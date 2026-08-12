@@ -22,6 +22,8 @@ struct SettingsView: View {
                             : copy("English")
                     )
                     .tag(language)
+                    .accessibilityIdentifier("settings.language.\(language.rawValue)")
+                    .accessibilityAddTraits(draft.language == language ? .isSelected : [])
                 }
             }
             .pickerStyle(.segmented)

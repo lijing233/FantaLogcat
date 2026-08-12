@@ -192,6 +192,7 @@ struct LogView: View {
                 Button(model.copy("清除筛选", "Clear filters"), action: clearFilters)
                     .help(model.copy("清除关键词和日志级别筛选", "Clear keyword and log level filters"))
                     .frame(minWidth: 28, minHeight: 28)
+                    .accessibilityIdentifier("logSearch.empty.clear")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
