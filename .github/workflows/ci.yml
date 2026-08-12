@@ -34,13 +34,13 @@ jobs:
           install -m 755 "$RUNNER_TEMP/mint/mint" "$RUNNER_TEMP/mint-bin/mint"
           echo "$RUNNER_TEMP/mint-bin" >> "$GITHUB_PATH"
 
+      - name: Install project tools
+        run: mint bootstrap
+
       - name: Verify Mint tools
         run: |
           mint version | grep -Fx 'Version: 0.18.0'
-          mint run xcodegen --version | grep -Fx 'Version: 2.46.0'
-
-      - name: Install project tools
-        run: mint bootstrap
+          mint run --no-install xcodegen --version | grep -Fx 'Version: 2.46.0'
 
       - name: Run CI checks
         run: make ci

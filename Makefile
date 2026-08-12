@@ -1,4 +1,4 @@
-.PHONY: generate test build check-public test-release-check ci release
+.PHONY: generate test build check-public test-release-check ci release-clean release
 
 DERIVED_DATA := build/DerivedData
 RELEASE_DIR := build/releases
@@ -23,12 +23,15 @@ test-release-check:
 
 ci: test-release-check test
 
-release: build
-	APP_PATH=$(BUILT_APP) Scripts/check-public-release.sh
+release-clean:
 	mkdir -p $(RELEASE_DIR)
 	rm -rf $(RELEASE_APP)
 	rm -f $(RELEASE_ZIP)
 	rm -f $(RELEASE_ZIP).sha256
+
+release: release-clean
+	$(MAKE) build
+	APP_PATH=$(BUILT_APP) Scripts/check-public-release.sh
 	ditto $(BUILT_APP) $(RELEASE_APP)
 	test -s $(RELEASE_APP)/Contents/MacOS/FantaLogcat
 	lipo -archs $(RELEASE_APP)/Contents/MacOS/FantaLogcat | grep -qx arm64
