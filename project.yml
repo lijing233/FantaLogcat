@@ -24,6 +24,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.fantalogcat.FantaLogcat
         PRODUCT_NAME: FantaLogcat
         INFOPLIST_KEY_CFBundleDisplayName: FantaLogcat
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
   FantaLogcatTests:
