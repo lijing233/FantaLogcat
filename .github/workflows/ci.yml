@@ -55,4 +55,6 @@ jobs:
           path: |
             build/releases/FantaLogcat-macos-arm64.zip
             build/releases/FantaLogcat-macos-arm64.zip.sha256
+            build/releases/FantaLogcat-macos-arm64.dmg
+            build/releases/FantaLogcat-macos-arm64.dmg.sha256
           if-no-files-found: error

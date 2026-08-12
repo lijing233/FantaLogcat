@@ -18,11 +18,13 @@ Complete every item from a clean checkout of the intended release commit.
 - [ ] Scan public artifacts for private configuration, credentials, logs, and unintended files.
 - [ ] Run `make release`.
 - [ ] Verify the packaged app is arm64 and that code-signature structure verifies.
-- [ ] Produce and verify the release ZIP SHA-256 checksum.
+- [ ] Open the DMG and verify that it contains `FantaLogcat.app` and an `Applications` shortcut.
+- [ ] Produce and verify the release ZIP and DMG SHA-256 checksums.
 - [ ] Sign and notarize the distribution artifact with the release credentials outside this repository.
 
 ## Publication
 
 - [ ] Create the GitHub Release manually.
-- [ ] Attach the release ZIP and its SHA-256 checksum.
+- [ ] Attach the release DMG and its SHA-256 checksum as the recommended download.
+- [ ] Attach the release ZIP and its SHA-256 checksum as the portable alternative.
 - [ ] Publish concise release notes describing user-visible changes and known limitations.
