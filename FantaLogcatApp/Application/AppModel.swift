@@ -39,11 +39,18 @@ final class AppModel: ObservableObject {
     private var appCatalog: (any AppCatalogProtocol)?
     private var logSession: (any LogSessionProtocol)?
     private var logTask: Task<Void, Never>?
+    private var logFlushTask: Task<Void, Never>?
+    private let cacheLimits: CacheLimits
+    private var logBuffer: LogRingBuffer
+    private var pendingLogEvents: [LogEvent] = []
+    private var pendingLogTextBytes = 0
     private let appSelectionStore: any AppSelectionStoreProtocol
     private var retryOperation: RetryOperation = .check
 
-    init(environment: AppEnvironment) {
+    init(environment: AppEnvironment, cacheLimits: CacheLimits = .default) {
         self.environment = environment
+        self.cacheLimits = cacheLimits
+        logBuffer = LogRingBuffer(limits: cacheLimits)
         appSelectionStore = environment.makeAppSelectionStore()
     }
 
@@ -137,7 +144,7 @@ final class AppModel: ObservableObject {
         appSelectionStore.recordRecent(app.packageName.value)
         refreshAppSections()
         selectedApp = app
-        logEvents = []
+        resetLogStorage()
         logStreamError = nil
         isLogStreaming = true
         phase = .viewingLogs
@@ -150,12 +157,14 @@ final class AppModel: ObservableObject {
                 let stream = try logSession.events(on: selectedDevice, pids: pids)
                 for try await event in stream {
                     guard !Task.isCancelled else { return }
-                    self?.appendLogEvent(event)
+                    await self?.appendLogEvent(event)
                 }
+                await self?.flushPendingLogEvents()
                 self?.isLogStreaming = false
             } catch is CancellationError {
                 return
             } catch {
+                await self?.flushPendingLogEvents()
                 self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
                 self?.isLogStreaming = false
             }
@@ -165,13 +174,14 @@ final class AppModel: ObservableObject {
     func returnToAppSelection() {
         logTask?.cancel()
         logTask = nil
+        resetLogStorage()
         isLogStreaming = false
         logStreamError = nil
         phase = .selectingApp
     }
 
     func clearLogs() {
-        logEvents = []
+        resetLogStorage()
     }
 
     func isFavorite(_ app: AppDescriptor) -> Bool {
@@ -202,11 +212,46 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func appendLogEvent(_ event: LogEvent) {
-        logEvents.append(event)
-        if logEvents.count > 100_000 {
-            logEvents.removeFirst(1_000)
+    private func appendLogEvent(_ event: LogEvent) async {
+        pendingLogEvents.append(event)
+        pendingLogTextBytes += event.message.utf8.count + event.rawText.utf8.count
+        if pendingLogEvents.count >= 500 || pendingLogTextBytes >= 1_024 * 1_024 {
+            await flushPendingLogEvents()
+        } else {
+            scheduleLogFlush()
         }
+    }
+
+    private func scheduleLogFlush() {
+        guard logFlushTask == nil else { return }
+        logFlushTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.flushPendingLogEvents()
+        }
+    }
+
+    private func flushPendingLogEvents() async {
+        logFlushTask = nil
+        guard !pendingLogEvents.isEmpty else { return }
+        let events = pendingLogEvents
+        pendingLogEvents.removeAll(keepingCapacity: true)
+        pendingLogTextBytes = 0
+        _ = await logBuffer.append(events)
+        logEvents = await logBuffer.snapshot(.all).events
+    }
+
+    private func resetLogStorage() {
+        logFlushTask?.cancel()
+        logFlushTask = nil
+        pendingLogEvents.removeAll(keepingCapacity: false)
+        pendingLogTextBytes = 0
+        logBuffer = LogRingBuffer(limits: cacheLimits)
+        logEvents = []
     }
 
     private func refreshAppSections() {

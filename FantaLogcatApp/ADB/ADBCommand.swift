@@ -105,7 +105,10 @@ enum ADBCommand: Sendable, Equatable {
         case .listThirdPartyPackages(let serial):
             ["-s", serial.value, "shell", "pm", "list", "packages", "-3"]
         case .applicationLabel(let serial, let package):
-            ["-s", serial.value, "shell", "dumpsys", "package", package.value]
+            [
+                "-s", serial.value, "shell",
+                "dumpsys package \(package.value) | grep -m 1 '^[[:space:]]*application-label:'"
+            ]
         case .resolvePIDs(let serial, let package):
             ["-s", serial.value, "shell", "ps", "-A", "-o", "PID,NAME"]
         case .startApplication(let serial, let package):

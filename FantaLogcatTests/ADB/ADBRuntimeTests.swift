@@ -51,6 +51,13 @@ final class ADBRuntimeTests: XCTestCase {
             ["-s", "ABC123", "shell", "ps", "-A", "-o", "PID,NAME"]
         )
         XCTAssertEqual(
+            ADBCommand.applicationLabel(serial, package).arguments,
+            [
+                "-s", "ABC123", "shell",
+                "dumpsys package com.example.game | grep -m 1 '^[[:space:]]*application-label:'"
+            ]
+        )
+        XCTAssertEqual(
             ADBCommand.logcatThreadtime(serial, pids: [42, 43]).arguments,
             ["-s", "ABC123", "logcat", "-v", "threadtime", "--pid=42", "--pid=43"]
         )

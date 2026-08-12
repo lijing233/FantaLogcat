@@ -150,6 +150,57 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.logEvents, [event])
     }
 
+    func testSelectingAppEvictsOldLogsWhenTheTextByteLimitIsReached() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let events = [1, 2, 3].map { id in
+            LogEvent(
+                id: UInt64(id),
+                deviceTimestamp: nil,
+                receivedAt: Date(),
+                pid: 42,
+                tid: 42,
+                priority: .info,
+                androidTag: "Unity",
+                businessTag: nil,
+                message: "1234",
+                rawText: "1234",
+                parseStatus: .complete,
+                packageName: nil,
+                processName: nil
+            )
+        }
+        let model = AppModel(
+            environment: AppEnvironment(
+                makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+                makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+                makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+                makeLogSession: { _ in AppModelLogSession(events: events) },
+                makeAppSelectionStore: { InMemoryAppSelectionStore() },
+                adbLicenseURL: URL(string: "https://example.com/terms")!
+            ),
+            cacheLimits: .init(maxEvents: 10, maxTextBytes: 16)
+        )
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.selectApp(app)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(model.logEvents.map(\.id), [2, 3])
+    }
+
     func testSelectionRecordsRecentAndFavoriteSectionsOnlyContainInstalledApps() async throws {
         let installation = ADBInstallation(version: "37.0.0", executableURL: URL(fileURLWithPath: "/managed/adb"))
         let tile = AppDescriptor(
