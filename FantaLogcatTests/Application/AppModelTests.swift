@@ -388,6 +388,7 @@ final class AppModelTests: XCTestCase {
         await model.refreshDevices()
         model.selectApp(app)
         await waitUntil { model.logEvents.count == events.count }
+        model.setLogCaptureMode(.standard)
         model.setLogLevels([.error])
         model.setLogKeyword("Unity")
 

@@ -1,5 +1,10 @@
 import Foundation
 
+enum LogCaptureMode: String, Sendable, Equatable, CaseIterable {
+    case fast
+    case standard
+}
+
 struct LogSearchHighlightSegment: Sendable, Equatable {
     let text: String
     let isMatch: Bool
@@ -48,33 +53,44 @@ enum LogSearchHighlighting {
 struct LogFilter: Sendable, Equatable {
     var levels: Set<LogPriority>
     var keyword: String
+    var captureMode: LogCaptureMode
 
-    init(levels: Set<LogPriority> = [], keyword: String = "") {
+    init(levels: Set<LogPriority> = [], keyword: String = "", captureMode: LogCaptureMode = .fast) {
         self.levels = levels
         self.keyword = keyword
+        self.captureMode = captureMode
     }
 
     var highlightTerms: [String] {
-        keywordGroups(for: keyword.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0 }
+        keywordGroups.flatMap { $0 }
     }
 
     func apply(_ events: [LogEvent]) -> [LogEvent] {
-        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        return events.filter { event in
-            let matchesLevel = levels.isEmpty || levels.contains(event.priority)
-            guard matchesLevel else { return false }
-            guard !query.isEmpty else { return true }
-            let searchableText = searchableText(for: event)
-            return keywordGroups(for: query).contains { group in
-                group.allSatisfy(searchableText.localizedCaseInsensitiveContains)
-            }
-        }
+        let groups = keywordGroups
+        return events.filter { matches($0, keywordGroups: groups) }
     }
 
-    private func searchableText(for event: LogEvent) -> String {
-        [event.message, event.androidTag, event.businessTag]
-            .compactMap { $0 }
-            .joined(separator: "\n")
+    func matches(_ event: LogEvent) -> Bool {
+        matches(event, keywordGroups: keywordGroups)
+    }
+
+    var hasKeyword: Bool { !keywordGroups.isEmpty }
+
+    /// OR groups containing AND terms, shared by local and device-side filtering.
+    var keywordGroups: [[String]] {
+        keywordGroups(for: keyword.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func matches(_ event: LogEvent, keywordGroups: [[String]]) -> Bool {
+        guard levels.isEmpty || levels.contains(event.priority) else { return false }
+        guard !keywordGroups.isEmpty else { return true }
+        return keywordGroups.contains { group in
+            group.allSatisfy { term in
+                event.message.localizedCaseInsensitiveContains(term)
+                    || event.androidTag?.localizedCaseInsensitiveContains(term) == true
+                    || event.businessTag?.localizedCaseInsensitiveContains(term) == true
+            }
+        }
     }
 
     private func keywordGroups(for query: String) -> [[String]] {

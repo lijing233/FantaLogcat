@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var favoriteApps: [AppDescriptor] = []
     @Published private(set) var isLoadingApps = false
     @Published private(set) var logEvents: [LogEvent] = []
+    @Published private(set) var filteredLogEvents: [LogEvent] = []
     @Published private(set) var isLogStreaming = false
     @Published private(set) var logStreamError: String?
     @Published private(set) var logHistoryError: String?
@@ -248,7 +249,12 @@ final class AppModel: ObservableObject {
                 do {
                     self?.isLogStreaming = true
                     self?.logCaptureState = .followingLiveLogs
-                    let stream = try logSession.events(on: selectedDevice, pids: pids, startingID: 1)
+                    let stream = try logSession.events(
+                        on: selectedDevice,
+                        pids: pids,
+                        filter: self?.logFilter ?? LogFilter(),
+                        startingID: 1
+                    )
                     for try await event in stream {
                         guard !Task.isCancelled else { return }
                         await self?.appendLogEvent(event)
@@ -287,20 +293,30 @@ final class AppModel: ObservableObject {
         resetLogStorage(resetEventIDs: false)
     }
 
-    var filteredLogEvents: [LogEvent] {
-        logFilter.apply(logEvents)
-    }
-
     func setLogLevels(_ levels: Set<LogPriority>) {
         logFilter.levels = levels
+        rebuildFilteredLogEvents()
+        restartFastCaptureIfNeeded()
     }
 
     func setLogKeyword(_ keyword: String) {
         logFilter.keyword = keyword
+        rebuildFilteredLogEvents()
+        restartFastCaptureIfNeeded()
+    }
+
+    func setLogCaptureMode(_ mode: LogCaptureMode) {
+        guard logFilter.captureMode != mode else { return }
+        let needsRestart = logFilter.hasKeyword
+        logFilter.captureMode = mode
+        rebuildFilteredLogEvents()
+        if needsRestart { restartCaptureIfViewing() }
     }
 
     func clearLogFilters() {
         logFilter = LogFilter()
+        rebuildFilteredLogEvents()
+        restartCaptureIfViewing()
     }
 
     func pauseLogPresentation() {
@@ -312,6 +328,7 @@ final class AppModel: ObservableObject {
         isLogPresentationPaused = false
         pendingLogEventCount = 0
         logEvents = await logBuffer.snapshot(.all).events
+        rebuildFilteredLogEvents()
     }
 
     func saveCurrentKeyword() {
@@ -441,11 +458,16 @@ final class AppModel: ObservableObject {
         let events = pendingLogEvents
         pendingLogEvents.removeAll(keepingCapacity: true)
         pendingLogTextBytes = 0
-        _ = await logBuffer.append(events)
+        let eviction = await logBuffer.append(events)
         if isLogPresentationPaused {
             pendingLogEventCount += events.count
         } else {
-            logEvents = await logBuffer.snapshot(.all).events
+            if eviction.evictedEvents == 0 {
+                logEvents.append(contentsOf: events)
+            } else {
+                logEvents = await logBuffer.snapshot(.all).events
+            }
+            filteredLogEvents.append(contentsOf: events.filter(logFilter.matches))
         }
     }
 
@@ -456,9 +478,25 @@ final class AppModel: ObservableObject {
         pendingLogTextBytes = 0
         logBuffer = LogRingBuffer(limits: cacheLimitsOverride ?? captureSettings.cacheLimits)
         logEvents = []
+        filteredLogEvents = []
         if resetEventIDs { nextLogEventID = 1 }
         isLogPresentationPaused = false
         pendingLogEventCount = 0
+    }
+
+    private func rebuildFilteredLogEvents() {
+        filteredLogEvents = logFilter.apply(logEvents)
+    }
+
+    private func restartFastCaptureIfNeeded() {
+        guard logFilter.captureMode == .fast,
+              logFilter.hasKeyword else { return }
+        restartCaptureIfViewing()
+    }
+
+    private func restartCaptureIfViewing() {
+        guard phase == .viewingLogs, let selectedApp else { return }
+        selectApp(selectedApp)
     }
 
     private func refreshAppSections() {
