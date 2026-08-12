@@ -153,6 +153,39 @@ final class ADBInstallerTests: XCTestCase {
         ))
     }
 
+    func testVersionsRootReplacedDuringDownloadCannotReceiveActivation() async throws {
+        let bytes = Data("valid archive".utf8)
+        let fixture = try InstallerFixture(downloadedBytes: bytes)
+        let downloader = BlockingDownloadClient(bytes: bytes)
+        let installer = fixture.makeInstaller(
+            manifest: .fixture(bytes: bytes),
+            downloader: downloader
+        )
+        let installTask = Task { try await installer.install(acceptingLicense: true) }
+        await downloader.waitUntilStarted()
+
+        let versions = fixture.root.appendingPathComponent("versions")
+        let displaced = fixture.root.appendingPathComponent("displaced-versions")
+        let external = fixture.root.appendingPathComponent("external-during-download")
+        try FileManager.default.moveItem(at: versions, to: displaced)
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        let sentinel = external.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: sentinel)
+        try FileManager.default.createSymbolicLink(at: versions, withDestinationURL: external)
+        await downloader.resume()
+
+        do {
+            _ = try await installTask.value
+            XCTFail("Expected replaced versions directory to be rejected")
+        } catch {
+            XCTAssertEqual(error as? ADBInstallerError, .fileOperationFailed)
+        }
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data("keep".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: external.appendingPathComponent("37.0.0").path
+        ))
+    }
+
     func testRollbackIsRejectedWhileInstallIsSuspended() async throws {
         let bytes = Data("valid archive".utf8)
         let fixture = try InstallerFixture(existingVersion: "36.0.2", downloadedBytes: bytes)

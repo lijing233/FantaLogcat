@@ -118,9 +118,8 @@ actor ADBInstaller: ADBInstalling {
     func install(acceptingLicense: Bool) async throws -> ADBInstallation {
         guard acceptingLicense else { throw ADBInstallerError.licenseNotAccepted }
         guard !isInstalling else { throw ADBInstallerError.installInProgress }
-        let versions: URL
         do {
-            versions = try secureVersionsDirectory()
+            _ = try secureVersionsDirectory()
         } catch {
             throw ADBInstallerError.fileOperationFailed
         }
@@ -181,11 +180,14 @@ actor ADBInstaller: ADBInstalling {
                 options: .atomic
             )
 
-            let destination = versions.appendingPathComponent(
+            // Revalidate after every suspension point before activating files. The
+            // managed directory may have changed while download or verification ran.
+            let activationVersions = try secureVersionsDirectory()
+            let destination = activationVersions.appendingPathComponent(
                 manifest.platformToolsVersion,
                 isDirectory: true
             )
-            let resolvedVersions = versions.resolvingSymlinksInPath().standardizedFileURL
+            let resolvedVersions = activationVersions.resolvingSymlinksInPath().standardizedFileURL
             let resolvedDestination = destination.resolvingSymlinksInPath().standardizedFileURL
             guard resolvedDestination.path.hasPrefix(resolvedVersions.path + "/") else {
                 throw ADBInstallerError.fileOperationFailed
