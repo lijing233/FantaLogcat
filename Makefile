@@ -1,15 +1,15 @@
 .PHONY: prepare-build generate test build check-public test-release-check test-dmg ci release-clean release
 
-DERIVED_DATA := build/DerivedData
-RELEASE_DIR := build/releases
+BUILD_DIR := .build
+DERIVED_DATA := $(BUILD_DIR)/DerivedData
+RELEASE_DIR := $(BUILD_DIR)/releases
 RELEASE_APP := $(RELEASE_DIR)/FantaLogcat.app
 RELEASE_ZIP := $(RELEASE_DIR)/FantaLogcat-macos-arm64.zip
 RELEASE_DMG := $(RELEASE_DIR)/FantaLogcat-macos-arm64.dmg
 BUILT_APP := $(DERIVED_DATA)/Build/Products/Release/FantaLogcat.app
 
 prepare-build:
-	mkdir -p build
-	touch build/.metadata_never_index
+	mkdir -p $(BUILD_DIR)
 
 generate: prepare-build
 	mint run xcodegen xcodegen generate

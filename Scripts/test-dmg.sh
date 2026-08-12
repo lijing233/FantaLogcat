@@ -38,6 +38,10 @@ is_mounted=true
 [ -x "$mount_point/FantaLogcat.app/Contents/MacOS/FantaLogcat" ]
 [ -L "$mount_point/Applications" ]
 [ "$(readlink "$mount_point/Applications")" = /Applications ]
+[ -f "$mount_point/.metadata_never_index" ] || {
+  printf '%s\n' 'DMG fixture check failed: Spotlight exclusion marker is missing' >&2
+  exit 1
+}
 [ -s "$mount_point/.background/background.png" ] || {
   printf '%s\n' 'DMG fixture check failed: background image is missing' >&2
   exit 1

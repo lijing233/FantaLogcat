@@ -42,6 +42,10 @@ background_path="$staging_dir/.background/background.png"
 read_write_dmg="$temporary_root/FantaLogcat-read-write.dmg"
 
 mkdir -p "$staging_dir" "$(dirname "$output_dmg")"
+# Keep the mounted installer from contributing a second application result to
+# Spotlight. The app remains available in Finder for the drag-to-Applications
+# install flow.
+touch "$staging_dir/.metadata_never_index"
 ditto "$app_path" "$staging_dir/FantaLogcat.app"
 ln -s /Applications "$staging_dir/Applications"
 swift "$script_dir/create-dmg-background.swift" "$background_path"

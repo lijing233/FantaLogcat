@@ -78,7 +78,7 @@ make build      # 构建 Release 应用
 make release    # 生成 DMG、ZIP 及 SHA-256 校验文件
 ```
 
-`make release` 会在 `build/releases` 生成：
+`make release` 会在隐藏且不会被 Spotlight 索引的 `.build/releases` 生成：
 
 - `FantaLogcat-macos-arm64.dmg` 与 `FantaLogcat-macos-arm64.dmg.sha256`
 - `FantaLogcat-macos-arm64.zip` 与 `FantaLogcat-macos-arm64.zip.sha256`
