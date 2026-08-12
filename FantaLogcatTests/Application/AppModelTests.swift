@@ -57,6 +57,7 @@ final class AppModelTests: XCTestCase {
             makeDeviceService: { _ in AppModelDeviceService(state: .noDevice) },
             makeAppCatalog: { _ in AppModelAppCatalog() },
             makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         ))
 
@@ -136,6 +137,7 @@ final class AppModelTests: XCTestCase {
             makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
             makeAppCatalog: { _ in AppModelAppCatalog(apps: [app], processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]) },
             makeLogSession: { _ in AppModelLogSession(events: [event]) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         ))
 
@@ -146,6 +148,44 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.phase, .viewingLogs)
         XCTAssertEqual(model.logEvents, [event])
+    }
+
+    func testSelectionRecordsRecentAndFavoriteSectionsOnlyContainInstalledApps() async throws {
+        let installation = ADBInstallation(version: "37.0.0", executableURL: URL(fileURLWithPath: "/managed/adb"))
+        let tile = AppDescriptor(
+            packageName: try AndroidPackageName("com.game.tile"),
+            presentation: AppPresentation(displayName: "Tile Match", symbolName: nil, provenance: .preset)
+        )
+        let other = AppDescriptor(
+            packageName: try AndroidPackageName("com.other.app"),
+            presentation: AppPresentation(displayName: "Other App", symbolName: nil, provenance: .generic)
+        )
+        let store = InMemoryAppSelectionStore(
+            preferences: AppSelectionPreferences(
+                favoritePackageNames: ["com.missing.app"],
+                recentPackageNames: ["com.missing.app"]
+            )
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel", transport: .usb
+        )
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [tile, other]) },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { store },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.toggleFavorite(other)
+        model.selectApp(tile)
+
+        XCTAssertEqual(model.recentApps.map(\.id), [tile.id])
+        XCTAssertEqual(model.favoriteApps.map(\.id), [other.id])
+        XCTAssertTrue(model.isFavorite(other))
     }
 }
 
@@ -211,5 +251,31 @@ private struct AppModelLogSession: LogSessionProtocol {
             emittedEvents.forEach { continuation.yield($0) }
             continuation.finish()
         }
+    }
+}
+
+private final class InMemoryAppSelectionStore: AppSelectionStoreProtocol, @unchecked Sendable {
+    private var value: AppSelectionPreferences
+
+    init(preferences: AppSelectionPreferences = .empty) {
+        value = preferences
+    }
+
+    var preferences: AppSelectionPreferences { value }
+
+    @discardableResult
+    func toggleFavorite(_ packageName: String) -> Bool {
+        if let index = value.favoritePackageNames.firstIndex(of: packageName) {
+            value.favoritePackageNames.remove(at: index)
+            return false
+        }
+        value.favoritePackageNames.append(packageName)
+        return true
+    }
+
+    func recordRecent(_ packageName: String) {
+        value.recentPackageNames.removeAll { $0 == packageName }
+        value.recentPackageNames.insert(packageName, at: 0)
+        value.recentPackageNames = Array(value.recentPackageNames.prefix(6))
     }
 }

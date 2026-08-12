@@ -27,6 +27,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedDevice: DeviceDescriptor?
     @Published private(set) var availableApps: [AppDescriptor] = []
     @Published private(set) var selectedApp: AppDescriptor?
+    @Published private(set) var recentApps: [AppDescriptor] = []
+    @Published private(set) var favoriteApps: [AppDescriptor] = []
     @Published private(set) var logEvents: [LogEvent] = []
     @Published private(set) var isLogStreaming = false
     @Published private(set) var logStreamError: String?
@@ -37,10 +39,12 @@ final class AppModel: ObservableObject {
     private var appCatalog: (any AppCatalogProtocol)?
     private var logSession: (any LogSessionProtocol)?
     private var logTask: Task<Void, Never>?
+    private let appSelectionStore: any AppSelectionStoreProtocol
     private var retryOperation: RetryOperation = .check
 
     init(environment: AppEnvironment) {
         self.environment = environment
+        appSelectionStore = environment.makeAppSelectionStore()
     }
 
     func prepareADB() async {
@@ -120,13 +124,18 @@ final class AppModel: ObservableObject {
     func loadApps() async {
         guard phase == .selectingApp, let selectedDevice else { return }
         guard let appCatalog else { return }
-        do { availableApps = try await appCatalog.listApps(on: selectedDevice) }
+        do {
+            availableApps = try await appCatalog.listApps(on: selectedDevice)
+            refreshAppSections()
+        }
         catch { availableApps = [] }
     }
 
     func selectApp(_ app: AppDescriptor) {
         guard let selectedDevice, let appCatalog, let logSession else { return }
         logTask?.cancel()
+        appSelectionStore.recordRecent(app.packageName.value)
+        refreshAppSections()
         selectedApp = app
         logEvents = []
         logStreamError = nil
@@ -165,6 +174,15 @@ final class AppModel: ObservableObject {
         logEvents = []
     }
 
+    func isFavorite(_ app: AppDescriptor) -> Bool {
+        appSelectionStore.preferences.favoritePackageNames.contains(app.packageName.value)
+    }
+
+    func toggleFavorite(_ app: AppDescriptor) {
+        _ = appSelectionStore.toggleFavorite(app.packageName.value)
+        refreshAppSections()
+    }
+
     private func resolveInstaller() throws -> any ADBInstalling {
         if let adbInstaller { return adbInstaller }
         let installer = try environment.makeADBInstaller()
@@ -189,6 +207,13 @@ final class AppModel: ObservableObject {
         if logEvents.count > 100_000 {
             logEvents.removeFirst(1_000)
         }
+    }
+
+    private func refreshAppSections() {
+        let appsByPackage = Dictionary(uniqueKeysWithValues: availableApps.map { ($0.packageName.value, $0) })
+        let preferences = appSelectionStore.preferences
+        recentApps = preferences.recentPackageNames.compactMap { appsByPackage[$0] }
+        favoriteApps = preferences.favoritePackageNames.compactMap { appsByPackage[$0] }
     }
 
     private func errorCode(_ error: Error) -> String {

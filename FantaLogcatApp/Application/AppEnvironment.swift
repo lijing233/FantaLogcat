@@ -5,6 +5,7 @@ struct AppEnvironment: Sendable {
     let makeDeviceService: @Sendable (ADBInstallation) -> any DeviceServiceProtocol
     let makeAppCatalog: @Sendable (ADBInstallation) -> any AppCatalogProtocol
     let makeLogSession: @Sendable (ADBInstallation) -> any LogSessionProtocol
+    let makeAppSelectionStore: @Sendable () -> any AppSelectionStoreProtocol
     let adbLicenseURL: URL
 
     static let production = AppEnvironment(
@@ -44,6 +45,7 @@ struct AppEnvironment: Sendable {
         makeLogSession: { installation in
             LogSession(adb: ADBRuntime(executableURL: installation.executableURL, runner: FoundationProcessRunner()))
         },
+        makeAppSelectionStore: { UserDefaultsAppSelectionStore() },
         adbLicenseURL: URL(string: "https://developer.android.com/studio/terms")!
     )
 
@@ -51,17 +53,20 @@ struct AppEnvironment: Sendable {
         installer: (any ADBInstalling)? = nil,
         deviceService: (any DeviceServiceProtocol)? = nil,
         appCatalog: (any AppCatalogProtocol)? = nil,
-        logSession: (any LogSessionProtocol)? = nil
+        logSession: (any LogSessionProtocol)? = nil,
+        appSelectionStore: (any AppSelectionStoreProtocol)? = nil
     ) -> AppEnvironment {
         let resolved = installer ?? TestADBInstaller()
         let resolvedDeviceService = deviceService ?? TestDeviceService()
         let resolvedAppCatalog = appCatalog ?? TestAppCatalog()
         let resolvedLogSession = logSession ?? TestLogSession()
+        let resolvedAppSelectionStore = appSelectionStore ?? TestAppSelectionStore()
         return AppEnvironment(
             makeADBInstaller: { resolved },
             makeDeviceService: { _ in resolvedDeviceService },
             makeAppCatalog: { _ in resolvedAppCatalog },
             makeLogSession: { _ in resolvedLogSession },
+            makeAppSelectionStore: { resolvedAppSelectionStore },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         )
     }
@@ -92,6 +97,12 @@ private struct TestLogSession: LogSessionProtocol {
             continuation.finish()
         }
     }
+}
+
+private final class TestAppSelectionStore: AppSelectionStoreProtocol, @unchecked Sendable {
+    var preferences: AppSelectionPreferences { .empty }
+    func toggleFavorite(_ packageName: String) -> Bool { true }
+    func recordRecent(_ packageName: String) {}
 }
 
 private actor TestADBInstaller: ADBInstalling {
