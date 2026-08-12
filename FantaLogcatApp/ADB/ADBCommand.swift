@@ -85,6 +85,7 @@ enum ADBCommand: Sendable, Equatable {
     case connect(ADBEndpoint)
     case disconnect(ADBEndpoint?)
     case listThirdPartyPackages(ADBDeviceSerial)
+    case applicationLabel(ADBDeviceSerial, AndroidPackageName)
     case resolvePIDs(ADBDeviceSerial, AndroidPackageName)
     case startApplication(ADBDeviceSerial, AndroidPackageName)
     case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
@@ -103,6 +104,8 @@ enum ADBCommand: Sendable, Equatable {
             endpoint.map { ["disconnect", $0.argument] } ?? ["disconnect"]
         case .listThirdPartyPackages(let serial):
             ["-s", serial.value, "shell", "pm", "list", "packages", "-3"]
+        case .applicationLabel(let serial, let package):
+            ["-s", serial.value, "shell", "dumpsys", "package", package.value]
         case .resolvePIDs(let serial, let package):
             ["-s", serial.value, "shell", "ps", "-A", "-o", "PID,NAME"]
         case .startApplication(let serial, let package):

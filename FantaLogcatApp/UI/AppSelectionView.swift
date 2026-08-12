@@ -193,11 +193,6 @@ private struct AppRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: app.presentation.symbolName ?? "app.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
-                .frame(width: 30)
-
             Button {
                 model.selectApp(app)
             } label: {
