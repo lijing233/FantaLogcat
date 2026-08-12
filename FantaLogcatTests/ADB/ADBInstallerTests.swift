@@ -70,6 +70,18 @@ final class ADBInstallerTests: XCTestCase {
         XCTAssertEqual(rolledBackState.installation?.version, "36.0.2")
     }
 
+    func testTamperedExecutableIsNotReportedAsReady() async throws {
+        let bytes = Data("valid archive".utf8)
+        let fixture = try InstallerFixture(downloadedBytes: bytes)
+        let installer = fixture.makeInstaller(manifest: .fixture(bytes: bytes))
+        let installed = try await installer.install(acceptingLicense: true)
+        try Data("truncated".utf8).write(to: installed.executableURL)
+
+        let state = await installer.state()
+
+        XCTAssertEqual(state, .notInstalled)
+    }
+
     func testVerificationFailurePreservesWorkingInstallation() async throws {
         let bytes = Data("valid archive".utf8)
         let fixture = try InstallerFixture(
@@ -157,8 +169,22 @@ private final class InstallerFixture {
             try Data("dylib".utf8).write(to: directory.appendingPathComponent("lib64/libc++.dylib"))
             try Data("properties".utf8).write(to: directory.appendingPathComponent("source.properties"))
             try Data("notice".utf8).write(to: directory.appendingPathComponent("NOTICE.txt"))
-            let metadata = #"{"schemaVersion":1,"version":"\#(existingVersion)","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#
-            try Data(metadata.utf8).write(to: directory.appendingPathComponent("installation.json"))
+            let requiredFiles = [
+                "adb", "lib64/libc++.dylib", "source.properties", "NOTICE.txt"
+            ]
+            let hashes = try Dictionary(uniqueKeysWithValues: requiredFiles.map { path in
+                let data = try Data(contentsOf: directory.appendingPathComponent(path))
+                return (path, digest(data))
+            })
+            let metadata: [String: Any] = [
+                "schemaVersion": 2,
+                "version": existingVersion,
+                "sha256": String(repeating: "0", count: 64),
+                "fileHashes": hashes
+            ]
+            try JSONSerialization.data(withJSONObject: metadata).write(
+                to: directory.appendingPathComponent("installation.json")
+            )
             let pointer = #"{"activeVersion":"\#(existingVersion)","previousVersion":null}"#
             try Data(pointer.utf8).write(to: root.appendingPathComponent("active.json"))
         }
@@ -185,6 +211,10 @@ private final class InstallerFixture {
         try files.contentsOfDirectory(atPath: root.path)
             .filter { $0.hasPrefix(".install-") }
     }
+}
+
+private func digest(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 private actor RecordingDownloadClient: DownloadClient {

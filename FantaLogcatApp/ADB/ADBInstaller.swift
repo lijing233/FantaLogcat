@@ -73,6 +73,7 @@ actor ADBInstaller: ADBInstalling {
         let schemaVersion: Int
         let version: String
         let sha256: String
+        let fileHashes: [String: String]
     }
 
     private static let requiredPaths = [
@@ -160,10 +161,14 @@ actor ADBInstaller: ADBInstalling {
             } catch {
                 throw ADBInstallerError.verificationFailed
             }
+            let fileHashes = try Dictionary(uniqueKeysWithValues: Self.requiredPaths.map {
+                ($0, try Self.sha256(of: candidate.appendingPathComponent($0)))
+            })
             let metadata = InstallationMetadata(
-                schemaVersion: 1,
+                schemaVersion: 2,
                 version: manifest.platformToolsVersion,
-                sha256: manifest.sha256
+                sha256: manifest.sha256,
+                fileHashes: fileHashes
             )
             try JSONEncoder().encode(metadata).write(
                 to: candidate.appendingPathComponent("installation.json"),
@@ -222,20 +227,25 @@ actor ADBInstaller: ADBInstalling {
         guard directory.path.hasPrefix(versions.path + "/"),
               let metadataData = try? Data(contentsOf: directory.appendingPathComponent("installation.json")),
               let metadata = try? JSONDecoder().decode(InstallationMetadata.self, from: metadataData),
-              metadata.schemaVersion == 1,
+              metadata.schemaVersion == 2,
               metadata.version == version,
               metadata.sha256.range(
                 of: #"^[0-9a-f]{64}$"#,
                 options: .regularExpression
               ) != nil,
-              version != manifest.platformToolsVersion || metadata.sha256 == manifest.sha256 else {
+              version != manifest.platformToolsVersion || metadata.sha256 == manifest.sha256,
+              Set(metadata.fileHashes.keys) == Set(Self.requiredPaths) else {
             return nil
         }
         for relativePath in Self.requiredPaths {
             let url = directory.appendingPathComponent(relativePath)
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                   values.isRegularFile == true,
-                  values.isSymbolicLink != true else {
+                  values.isSymbolicLink != true,
+                  let expectedHash = metadata.fileHashes[relativePath],
+                  expectedHash.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
+                  let actualHash = try? Self.sha256(of: url),
+                  actualHash == expectedHash else {
                 return nil
             }
         }
@@ -277,6 +287,18 @@ actor ADBInstaller: ADBInstalling {
             of: #"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$"#,
             options: .regularExpression
         ) != nil
+    }
+
+    private static func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk = try handle.read(upToCount: 64 * 1_024) ?? Data()
+            guard !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
 
