@@ -113,6 +113,22 @@ final class ADBInstallerTests: XCTestCase {
         XCTAssertEqual(state, .notInstalled)
     }
 
+    func testSymlinkedVersionDirectoryCannotEscapeVersionsDirectory() async throws {
+        let fixture = try InstallerFixture(existingVersion: "36.0.2")
+        let versionDirectory = fixture.root.appendingPathComponent("versions/36.0.2")
+        let externalDirectory = fixture.root.appendingPathComponent("external-install")
+        try FileManager.default.moveItem(at: versionDirectory, to: externalDirectory)
+        try FileManager.default.createSymbolicLink(
+            at: versionDirectory,
+            withDestinationURL: externalDirectory
+        )
+        let installer = fixture.makeInstaller(manifest: .fixture(bytes: Data("archive".utf8)))
+
+        let state = await installer.state()
+
+        XCTAssertEqual(state, .notInstalled)
+    }
+
     func testRollbackIsRejectedWhileInstallIsSuspended() async throws {
         let bytes = Data("valid archive".utf8)
         let fixture = try InstallerFixture(existingVersion: "36.0.2", downloadedBytes: bytes)

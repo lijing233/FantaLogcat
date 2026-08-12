@@ -224,7 +224,12 @@ actor ADBInstaller: ADBInstalling {
             .standardizedFileURL
         let directory = versions.appendingPathComponent(version, isDirectory: true)
             .standardizedFileURL
+        let resolvedVersions = versions.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
         guard directory.path.hasPrefix(versions.path + "/"),
+              resolvedDirectory.path.hasPrefix(resolvedVersions.path + "/"),
+              Self.isDirectoryWithoutSymlink(versions),
+              Self.isDirectoryWithoutSymlink(directory),
               let metadataData = try? Data(contentsOf: directory.appendingPathComponent("installation.json")),
               let metadata = try? JSONDecoder().decode(InstallationMetadata.self, from: metadataData),
               metadata.schemaVersion == 2,
@@ -239,7 +244,10 @@ actor ADBInstaller: ADBInstalling {
         }
         for relativePath in Self.requiredPaths {
             let url = directory.appendingPathComponent(relativePath)
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+            let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
+            guard Self.hasNoSymlinkedParent(for: relativePath, under: directory),
+                  resolvedURL.path.hasPrefix(resolvedDirectory.path + "/"),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                   values.isRegularFile == true,
                   values.isSymbolicLink != true,
                   let expectedHash = metadata.fileHashes[relativePath],
@@ -299,6 +307,24 @@ actor ADBInstaller: ADBInstalling {
             hasher.update(data: chunk)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isDirectoryWithoutSymlink(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [
+            .isDirectoryKey,
+            .isSymbolicLinkKey
+        ]) else { return false }
+        return values.isDirectory == true && values.isSymbolicLink != true
+    }
+
+    private static func hasNoSymlinkedParent(for relativePath: String, under directory: URL) -> Bool {
+        let components = relativePath.split(separator: "/").dropLast()
+        var current = directory
+        for component in components {
+            current.appendPathComponent(String(component), isDirectory: true)
+            guard isDirectoryWithoutSymlink(current) else { return false }
+        }
+        return true
     }
 }
 
