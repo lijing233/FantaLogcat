@@ -46,4 +46,4 @@ schemes:
         FantaLogcat: all
         FantaLogcatTests: [test]
     test:
-      targets: [FantaLogcatTests]
+      targets: [FantaLogcatTests, FantaLogcatUITests]
