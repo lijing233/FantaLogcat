@@ -11,7 +11,7 @@
 1. **最近查看**：最多 6 项，按最后一次选择时间倒序。同一包名只保留一项。
 2. **常用应用**：合并团队内置预设与用户在本机手动星标的包名。团队预设显示“团队”标记；用户可星标或取消星标任意已安装应用。
 
-每个应用是更大的整行可点击卡片：应用显示名在第一行，完整 Android application ID 以较小的等宽字体在第二行，右侧为星标操作。点击星标不进入日志页；点击其余区域进入日志页。
+每个应用是更大的整行可点击卡片：Android 桌面显示名称在第一行，完整 Android application ID 以较小的等宽字体在第二行，右侧为星标操作。点击星标不进入日志页；点击其余区域进入日志页。左侧不显示没有语义或点击作用的占位图标。
 
 页面提供：
 
@@ -28,12 +28,15 @@
 - `favoritePackageNames: [String]`：用户手动星标的包名；团队预置不写入此集合。
 - `recentPackageNames: [String]`：最近选择的包名，顺序即最近优先，最多 6 项。
 
+对团队预置应用，团队配置中的 `displayName` 为最高优先级。对其他应用，FantaLogcat 使用受设备选择范围约束的 `adb shell dumpsys package <package-name>` 获取 Android Package Manager 的 application label；这是系统用于向用户展示应用的名称。查询失败、名称为空或不安全时才回退为包名。为避免对设备启动时做 N 次昂贵查询，通用应用名称会缓存在当前运行期和本机偏好中；首次浏览完整应用列表时可渐进补全，不阻塞选择页的显示。
+
 偏好仅在当前 Mac 本机保存，跨设备通用；不保存设备序列号、日志内容、日志会话、搜索文字或未安装应用的显示名称。显示时与当前扫描到的应用取交集，因此卸载应用不会显示，重新安装后可恢复星标/最近状态。
 
 ## 架构
 
 - `AppSelectionStoreProtocol` 隔离 UserDefaults，支持内存测试实现。
 - `AppModel` 持有 store，向视图公开 `recentApps`、`favoriteApps`，并在 `selectApp` 后记录最近项；提供 `toggleFavorite`。
+- `AppCatalog` 负责将 Android application label 合并进通用应用展示资料；界面不解析或执行 ADB 命令。
 - `AppSelectionView` 只负责按搜索/展开状态派生可见应用与渲染；不直接访问 UserDefaults。
 - 团队预置仍由 `AppCatalog` 生成，之后可从 bundled 配置注入；本功能不得把“团队预置”误写为个人星标。
 

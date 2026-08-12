@@ -183,3 +183,48 @@ git status --short
 ```
 
 Expected: clean worktree after source commits; generated Xcode project changes are committed only if source-controlled and changed intentionally.
+
+### Task 5: Resolve real Android application labels
+
+**Files:**
+- Modify: `FantaLogcatApp/ADB/ADBCommand.swift`
+- Modify: `FantaLogcatApp/Apps/AppCatalog.swift`
+- Modify: `FantaLogcatApp/UI/AppSelectionView.swift`
+- Modify: `FantaLogcatTests/Apps/AppCatalogTests.swift`
+
+**Interfaces:**
+- Produces: `ADBCommand.applicationLabel`, `AppCatalog` label parsing and safe fallback behavior.
+
+- [ ] **Step 1: Write failing catalog tests**
+
+```swift
+func testGenericAppUsesAndroidApplicationLabel() async throws {
+    let catalog = AppCatalog(adb: StubAppADB(packages: ["com.game.tile"], applicationLabels: ["com.game.tile": "Tile Match"]))
+    XCTAssertEqual(try await catalog.listApps(on: device).first?.presentation.displayName, "Tile Match")
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `make test`
+
+Expected: compile failure because `applicationLabel` query is not implemented.
+
+- [ ] **Step 3: Implement bounded application-label enrichment**
+
+Add a serial- and package-scoped command using `dumpsys package <package>`. Parse `application-label:` lines, preferring a nonempty value and rejecting control characters. Preserve team preset names. Enrich only generic apps on explicit full-list/search access; cache successful name values for the current run and preferred local entry. Never make an app list fail because a label lookup fails.
+
+- [ ] **Step 4: Remove the decorative app-row icon**
+
+Retain first-line display name, package ID, team badge, app selection, and favorite action; remove the left icon so every remaining element is functional.
+
+- [ ] **Step 5: Run verification and commit**
+
+Run: `make test && make build`
+
+Expected: all tests pass and Release build succeeds.
+
+```bash
+git add FantaLogcatApp FantaLogcatTests docs/superpowers
+git commit -m "feat: show Android application labels"
+```
