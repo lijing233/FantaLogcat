@@ -28,10 +28,11 @@ release: build
 	mkdir -p $(RELEASE_DIR)
 	rm -rf $(RELEASE_APP)
 	rm -f $(RELEASE_ZIP)
+	rm -f $(RELEASE_ZIP).sha256
 	ditto $(BUILT_APP) $(RELEASE_APP)
 	test -s $(RELEASE_APP)/Contents/MacOS/FantaLogcat
 	lipo -archs $(RELEASE_APP)/Contents/MacOS/FantaLogcat | grep -qx arm64
 	test -s $(RELEASE_APP)/Contents/Resources/AppIcon.icns
 	codesign --verify --deep --strict $(RELEASE_APP)
 	ditto -c -k --sequesterRsrc --keepParent $(RELEASE_APP) $(RELEASE_ZIP)
-	shasum -a 256 $(RELEASE_ZIP) > $(RELEASE_ZIP).sha256
+	cd $(RELEASE_DIR) && shasum -a 256 $(notdir $(RELEASE_ZIP)) > $(notdir $(RELEASE_ZIP)).sha256.tmp && mv $(notdir $(RELEASE_ZIP)).sha256.tmp $(notdir $(RELEASE_ZIP)).sha256

@@ -13,13 +13,31 @@ concurrency:
 
 jobs:
   verify-release:
-    runs-on: macos-14
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install Mint
-        run: brew install mint
+      - name: Verify Xcode toolchain
+        run: |
+          xcodebuild -version | grep -Fx 'Xcode 26.6'
+          swift --version | grep -F 'Apple Swift version 6.3.3'
+
+      - name: Install Mint 0.18.0
+        run: |
+          curl --fail --location --retry 3 --output /tmp/mint.zip https://github.com/yonaskolb/Mint/releases/download/0.18.0/mint.zip
+          echo 'ce44b0fc4ef3bc854ea43b2d2d3f96502d52231c0e0849ec212815121955f5ef  /tmp/mint.zip' | shasum -a 256 -c -
+          unzip -q /tmp/mint.zip -d "$RUNNER_TEMP/mint"
+          mkdir -p "$RUNNER_TEMP/mint-bin"
+          install -m 755 "$RUNNER_TEMP/mint/mint" "$RUNNER_TEMP/mint-bin/mint"
+          echo "$RUNNER_TEMP/mint-bin" >> "$GITHUB_PATH"
+
+      - name: Verify Mint tools
+        run: |
+          mint version | grep -Fx 'Version: 0.18.0'
+          mint run xcodegen --version | grep -Fx 'Version: 2.46.0'
 
       - name: Install project tools
         run: mint bootstrap
@@ -31,7 +49,7 @@ jobs:
         run: make release
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: FantaLogcat-macos-arm64
           path: |
