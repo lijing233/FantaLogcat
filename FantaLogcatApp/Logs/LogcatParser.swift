@@ -102,6 +102,15 @@ actor LogcatParser {
         return emitted
     }
 
+    /// Emits the completed line currently being held for a possible stack-trace
+    /// continuation. Live log streams call this after a short idle interval so
+    /// a final log line does not wait indefinitely for the next ADB output.
+    func flushPending() -> [LogEvent] {
+        guard let pending else { return [] }
+        self.pending = nil
+        return [pending.event]
+    }
+
     private func process(_ line: String, receivedAt: Date, into emitted: inout [LogEvent]) {
         switch parseHeader(line, receivedAt: receivedAt) {
         case .valid(let parsed):

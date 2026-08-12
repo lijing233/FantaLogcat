@@ -40,6 +40,43 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(events.map(\.priority), [.warning])
         XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial, pids: [1234], lineCount: 500))
     }
+
+    func testEventsFlushesAnIdleFinalLineWithoutWaitingForTheNextADBChunk() async throws {
+        let runtime = IdleStreamingADBRuntime()
+        let session = LogSession(adb: runtime)
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("SERIAL"),
+            displayName: "Pixel",
+            transport: .usb
+        )
+        let stream = try session.events(on: device, pids: [])
+        let nextEvent = Task {
+            var iterator = stream.makeAsyncIterator()
+            return try await iterator.next()
+        }
+
+        await waitUntil { runtime.hasSubscriber }
+        runtime.emit(.stdout(Data("08-12 10:00:01.123  1234  1234 D Android.revenueToMMP: sent\n".utf8)))
+
+        let event = try await nextEvent.value
+        XCTAssertEqual(event?.androidTag, "Android.revenueToMMP")
+        XCTAssertEqual(event?.message, "sent")
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(1),
+        condition: @escaping () -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !condition() {
+            guard clock.now < deadline else {
+                XCTFail("Condition was not satisfied before timeout")
+                return
+            }
+            await Task.yield()
+        }
+    }
 }
 
 private final class StreamingADBRuntime: ADBRuntimeProtocol, @unchecked Sendable {
@@ -73,6 +110,29 @@ private final class StreamingADBRuntime: ADBRuntimeProtocol, @unchecked Sendable
             outputs.forEach { continuation.yield($0) }
             continuation.finish()
         }
+    }
+}
+
+private final class IdleStreamingADBRuntime: ADBRuntimeProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncThrowingStream<ProcessOutput, Error>.Continuation?
+
+    var hasSubscriber: Bool {
+        lock.withLock { continuation != nil }
+    }
+
+    func run(_ command: ADBCommand, timeout: Duration) async throws -> ProcessResult {
+        .success()
+    }
+
+    func stream(_ command: ADBCommand) throws -> AsyncThrowingStream<ProcessOutput, Error> {
+        AsyncThrowingStream { continuation in
+            lock.withLock { self.continuation = continuation }
+        }
+    }
+
+    func emit(_ output: ProcessOutput) {
+        _ = lock.withLock { continuation?.yield(output) }
     }
 }
 

@@ -38,6 +38,7 @@ extension LogSessionProtocol {
 }
 
 struct LogSession: LogSessionProtocol, Sendable {
+    private static let liveEventIdleFlushDelay = Duration.milliseconds(80)
     private let adb: any ADBRuntimeProtocol
 
     init(adb: any ADBRuntimeProtocol) {
@@ -78,24 +79,46 @@ struct LogSession: LogSessionProtocol, Sendable {
         )
         let task = Task.detached(priority: .userInitiated) {
             let parser = LogcatParser(initialID: startingID)
-            do {
-                for try await item in output {
-                    guard case .stdout(let data) = item else { continue }
-                    let parsed = await parser.consume(data, receivedAt: Date())
-                    for event in parsed {
-                        guard case .enqueued = pair.continuation.yield(event) else {
-                            throw ProcessRunnerError.outputBufferOverflow
-                        }
-                    }
-                }
-                let finalEvents = await parser.finish(receivedAt: Date())
-                for event in finalEvents {
+            var idleFlushTask: Task<Void, Never>?
+
+            func yield(_ events: [LogEvent]) throws {
+                for event in events {
                     guard case .enqueued = pair.continuation.yield(event) else {
                         throw ProcessRunnerError.outputBufferOverflow
                     }
                 }
+            }
+
+            do {
+                for try await item in output {
+                    guard case .stdout(let data) = item else { continue }
+                    idleFlushTask?.cancel()
+                    let parsed = await parser.consume(data, receivedAt: Date())
+                    try yield(parsed)
+
+                    idleFlushTask = Task.detached(priority: .userInitiated) {
+                        do {
+                            try await Task.sleep(for: Self.liveEventIdleFlushDelay)
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
+
+                        let pending = await parser.flushPending()
+                        for event in pending {
+                            guard case .enqueued = pair.continuation.yield(event) else {
+                                pair.continuation.finish(throwing: ProcessRunnerError.outputBufferOverflow)
+                                return
+                            }
+                        }
+                    }
+                }
+                idleFlushTask?.cancel()
+                let finalEvents = await parser.finish(receivedAt: Date())
+                try yield(finalEvents)
                 pair.continuation.finish()
             } catch {
+                idleFlushTask?.cancel()
                 pair.continuation.finish(throwing: error)
             }
         }

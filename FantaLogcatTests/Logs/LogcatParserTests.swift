@@ -47,6 +47,24 @@ final class LogcatParserTests: XCTestCase {
         XCTAssertEqual(events.first?.rawText, "not threadtime")
     }
 
+    func testFlushPendingPublishesFinalLiveLineWithoutWaitingForAnotherLine() async throws {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
+        let line = "08-11 12:00:00.123  42  43 D Android.revenueToMMP: revenue sent"
+
+        let immediatelyEmitted = await parser.consume(
+            Data((line + "\n").utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+        let flushed = await parser.flushPending()
+
+        XCTAssertTrue(immediatelyEmitted.isEmpty)
+        XCTAssertEqual(flushed.count, 1)
+        XCTAssertEqual(flushed.first?.androidTag, "Android.revenueToMMP")
+        XCTAssertEqual(flushed.first?.message, "revenue sent")
+        let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+        XCTAssertTrue(tail.isEmpty)
+    }
+
     func testMapsEveryThreadtimePriority() async {
         let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
         let cases: [(String, LogPriority)] = [
