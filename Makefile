@@ -1,4 +1,4 @@
-.PHONY: generate test build release
+.PHONY: generate test build check-public test-release-check ci release
 
 DERIVED_DATA := build/DerivedData
 RELEASE_DIR := build/releases
@@ -15,12 +15,23 @@ test: generate
 build: generate
 	xcodebuild -project FantaLogcat.xcodeproj -scheme FantaLogcat -configuration Release -derivedDataPath $(DERIVED_DATA) -destination 'platform=macOS,arch=arm64' build
 
+check-public:
+	Scripts/check-public-release.sh
+
+test-release-check:
+	Scripts/test-public-release-check.sh
+
+ci: test-release-check test
+
 release: build
+	APP_PATH=$(BUILT_APP) Scripts/check-public-release.sh
 	mkdir -p $(RELEASE_DIR)
 	rm -rf $(RELEASE_APP)
 	rm -f $(RELEASE_ZIP)
 	ditto $(BUILT_APP) $(RELEASE_APP)
 	test -s $(RELEASE_APP)/Contents/MacOS/FantaLogcat
+	lipo -archs $(RELEASE_APP)/Contents/MacOS/FantaLogcat | grep -qx arm64
 	test -s $(RELEASE_APP)/Contents/Resources/AppIcon.icns
 	codesign --verify --deep --strict $(RELEASE_APP)
 	ditto -c -k --sequesterRsrc --keepParent $(RELEASE_APP) $(RELEASE_ZIP)
+	shasum -a 256 $(RELEASE_ZIP) > $(RELEASE_ZIP).sha256

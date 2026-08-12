@@ -9,5 +9,5 @@ build/
 *.xcuserstate
 xcuserdata/
 
-# Team-only build input. Public releases must never embed this file.
+# Team-only build input. Public release checks reject this file in source and artifacts.
 Config/TeamConfig.json
