@@ -8,7 +8,7 @@ FantaLogcat is a native macOS Logcat viewer for Android debugging. Connect a dev
 - An Android device with Developer options and USB debugging enabled, or Wireless debugging enabled
 - A USB cable for USB debugging; unlock the device and accept its USB debugging authorization prompt when asked
 
-On first use, FantaLogcat downloads the official Android Platform-Tools package, verifies its SHA-256 checksum, and stores the managed copy in its app-support folder. It does not require a separately installed `adb`.
+When Android tools are needed, review the Google license terms and choose **Accept and install**. FantaLogcat then downloads the official Android Platform-Tools package, verifies its SHA-256 checksum, and stores the managed copy in its app-support folder. It does not require a separately installed `adb`.
 
 ## Use
 
