@@ -14,6 +14,13 @@ enum ADBPreparationState: Equatable {
     case failed(String)
 }
 
+enum LogCaptureState: Equatable {
+    case waitingForAppLaunch
+    case loadingRecentLogs
+    case followingLiveLogs
+    case stopped
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     private enum RetryOperation {
@@ -29,9 +36,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedApp: AppDescriptor?
     @Published private(set) var recentApps: [AppDescriptor] = []
     @Published private(set) var favoriteApps: [AppDescriptor] = []
+    @Published private(set) var isLoadingApps = false
     @Published private(set) var logEvents: [LogEvent] = []
     @Published private(set) var isLogStreaming = false
     @Published private(set) var logStreamError: String?
+    @Published private(set) var logHistoryError: String?
+    @Published private(set) var logCaptureState: LogCaptureState = .stopped
+    @Published private(set) var logFilter = LogFilter()
+    @Published private(set) var savedKeywords: [SavedKeyword] = []
+    @Published private(set) var isLogPresentationPaused = false
+    @Published private(set) var pendingLogEventCount = 0
+    @Published var isShowingSettings = false
+    @Published private(set) var language: AppLanguage
+    @Published private(set) var captureSettings: LogCaptureSettings
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
@@ -40,17 +57,29 @@ final class AppModel: ObservableObject {
     private var logSession: (any LogSessionProtocol)?
     private var logTask: Task<Void, Never>?
     private var logFlushTask: Task<Void, Never>?
-    private let cacheLimits: CacheLimits
+    private var deviceMonitorTask: Task<Void, Never>?
+    private let cacheLimitsOverride: CacheLimits?
     private var logBuffer: LogRingBuffer
+    private var nextLogEventID: UInt64 = 1
     private var pendingLogEvents: [LogEvent] = []
     private var pendingLogTextBytes = 0
+    private let keywordStore: any LogKeywordStoreProtocol
     private let appSelectionStore: any AppSelectionStoreProtocol
     private var retryOperation: RetryOperation = .check
 
-    init(environment: AppEnvironment, cacheLimits: CacheLimits = .default) {
+    init(
+        environment: AppEnvironment,
+        cacheLimits: CacheLimits? = nil,
+        keywordStore: any LogKeywordStoreProtocol = UserDefaultsLogKeywordStore()
+    ) {
+        let loadedCaptureSettings = LogCaptureSettings.load()
         self.environment = environment
-        self.cacheLimits = cacheLimits
-        logBuffer = LogRingBuffer(limits: cacheLimits)
+        cacheLimitsOverride = cacheLimits
+        captureSettings = loadedCaptureSettings
+        logBuffer = LogRingBuffer(limits: cacheLimits ?? loadedCaptureSettings.cacheLimits)
+        self.keywordStore = keywordStore
+        savedKeywords = keywordStore.keywords
+        language = AppLanguage(rawValue: UserDefaults.standard.string(forKey: AppLanguage.storageKey) ?? "") ?? .chinese
         appSelectionStore = environment.makeAppSelectionStore()
     }
 
@@ -109,14 +138,20 @@ final class AppModel: ObservableObject {
                 return
             }
             let state = try await deviceService.refresh()
-            deviceConnection = state
-            if case .connected(let device) = state {
-                selectedDevice = device
-                phase = .selectingApp
-                await loadApps()
-            }
+            applyDeviceConnection(state)
+            startDeviceMonitoringIfNeeded()
         } catch {
-            deviceConnection = .failed(errorCode(error))
+            applyDeviceConnection(.failed(errorCode(error)))
+            startDeviceMonitoringIfNeeded()
+        }
+    }
+
+    func monitorDeviceConnection() async {
+        guard phase != .preparingADB, let deviceService else { return }
+        do {
+            applyDeviceConnection(try await deviceService.refresh())
+        } catch {
+            applyDeviceConnection(.failed(errorCode(error)))
         }
     }
 
@@ -129,13 +164,24 @@ final class AppModel: ObservableObject {
     }
 
     func loadApps() async {
-        guard phase == .selectingApp, let selectedDevice else { return }
+        guard phase == .selectingApp, let selectedDevice, !isLoadingApps else { return }
         guard let appCatalog else { return }
+        isLoadingApps = true
+        defer { isLoadingApps = false }
         do {
             availableApps = try await appCatalog.listApps(on: selectedDevice)
             refreshAppSections()
         }
         catch { availableApps = [] }
+    }
+
+    func setLanguage(_ language: AppLanguage) {
+        self.language = language
+        UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.storageKey)
+    }
+
+    func copy(_ chinese: String, _ english: String) -> String {
+        language == .chinese ? chinese : english
     }
 
     func selectApp(_ app: AppDescriptor) {
@@ -146,27 +192,73 @@ final class AppModel: ObservableObject {
         selectedApp = app
         resetLogStorage()
         logStreamError = nil
-        isLogStreaming = true
+        logHistoryError = nil
+        isLogStreaming = false
+        logCaptureState = .waitingForAppLaunch
         phase = .viewingLogs
         logTask = Task { [weak self] in
-            let pids = (try? await appCatalog.resolveProcesses(
-                packageName: app.packageName,
-                on: selectedDevice
-            ))?.map(\.pid) ?? []
-            do {
-                let stream = try logSession.events(on: selectedDevice, pids: pids)
-                for try await event in stream {
-                    guard !Task.isCancelled else { return }
-                    await self?.appendLogEvent(event)
+            while !Task.isCancelled {
+                let pids: [Int32]
+                do {
+                    pids = try await appCatalog.resolveProcesses(
+                        packageName: app.packageName,
+                        on: selectedDevice
+                    ).map(\.pid)
+                } catch {
+                    self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
+                    self?.logCaptureState = .stopped
+                    return
                 }
-                await self?.flushPendingLogEvents()
-                self?.isLogStreaming = false
-            } catch is CancellationError {
-                return
-            } catch {
-                await self?.flushPendingLogEvents()
-                self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
-                self?.isLogStreaming = false
+
+                guard !pids.isEmpty else {
+                    self?.isLogStreaming = false
+                    self?.logCaptureState = .waitingForAppLaunch
+                    try? await Task.sleep(for: .seconds(1))
+                    continue
+                }
+
+                self?.logCaptureState = .loadingRecentLogs
+                do {
+                    let historyLines = self?.captureSettings.historyLines ?? 0
+                    if historyLines > 0 {
+                        let recentEvents = try await logSession.recentEvents(
+                            on: selectedDevice,
+                            pids: pids,
+                            limit: historyLines
+                        )
+                        guard !Task.isCancelled else { return }
+                        for event in recentEvents {
+                            await self?.appendLogEvent(event)
+                        }
+                        await self?.flushPendingLogEvents()
+                    }
+                } catch {
+                    self?.logHistoryError = self?.errorCode(error) ?? "unexpected_error"
+                }
+
+                do {
+                    self?.isLogStreaming = true
+                    self?.logCaptureState = .followingLiveLogs
+                    let stream = try logSession.events(on: selectedDevice, pids: pids, startingID: 1)
+                    for try await event in stream {
+                        guard !Task.isCancelled else { return }
+                        await self?.appendLogEvent(event)
+                    }
+                    await self?.flushPendingLogEvents()
+                    self?.isLogStreaming = false
+                    self?.logCaptureState = .waitingForAppLaunch
+                    try? await Task.sleep(for: .milliseconds(500))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    await self?.flushPendingLogEvents()
+                    await self?.monitorDeviceConnection()
+                    guard self?.phase == .viewingLogs else { return }
+                    self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
+                    self?.isLogStreaming = false
+                    self?.logCaptureState = .stopped
+                    return
+                }
             }
         }
     }
@@ -177,11 +269,56 @@ final class AppModel: ObservableObject {
         resetLogStorage()
         isLogStreaming = false
         logStreamError = nil
+        logHistoryError = nil
+        logCaptureState = .stopped
         phase = .selectingApp
     }
 
     func clearLogs() {
-        resetLogStorage()
+        resetLogStorage(resetEventIDs: false)
+    }
+
+    var filteredLogEvents: [LogEvent] {
+        logFilter.apply(logEvents)
+    }
+
+    func setLogLevels(_ levels: Set<LogPriority>) {
+        logFilter.levels = levels
+    }
+
+    func setLogKeyword(_ keyword: String) {
+        logFilter.keyword = keyword
+    }
+
+    func pauseLogPresentation() {
+        isLogPresentationPaused = true
+    }
+
+    func resumeLogPresentation() async {
+        guard isLogPresentationPaused else { return }
+        isLogPresentationPaused = false
+        pendingLogEventCount = 0
+        logEvents = await logBuffer.snapshot(.all).events
+    }
+
+    func saveCurrentKeyword() {
+        keywordStore.save(logFilter.keyword)
+        savedKeywords = keywordStore.keywords
+    }
+
+    func removeSavedKeyword(_ keyword: SavedKeyword) {
+        keywordStore.remove(keyword.value)
+        savedKeywords = keywordStore.keywords
+    }
+
+    func setCaptureSettings(_ settings: LogCaptureSettings) {
+        captureSettings = settings.normalized
+        captureSettings.save()
+    }
+
+    func exportText(scope: LogExportScope, redact: Bool) -> String {
+        let events = scope == .filtered ? filteredLogEvents : logEvents
+        return LogExporter.text(events: events, redact: redact)
     }
 
     func isFavorite(_ app: AppDescriptor) -> Bool {
@@ -212,9 +349,60 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func startDeviceMonitoringIfNeeded() {
+        guard deviceMonitorTask == nil else { return }
+        deviceMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                await self.monitorDeviceConnection()
+            }
+        }
+    }
+
+    private func applyDeviceConnection(_ state: DeviceConnectionState) {
+        deviceConnection = state
+        switch state {
+        case .connected(let device):
+            selectedDevice = device
+            if phase == .selectingDevice {
+                phase = .selectingApp
+                Task { await loadApps() }
+            }
+        case .scanning:
+            break
+        case .noDevice, .authorizationRequired, .selectionRequired, .offline, .failed:
+            guard phase == .selectingApp || phase == .viewingLogs else { return }
+            logTask?.cancel()
+            logTask = nil
+            isLogStreaming = false
+            logCaptureState = .stopped
+            logStreamError = nil
+            logHistoryError = nil
+            selectedApp = nil
+            phase = .selectingDevice
+        }
+    }
+
     private func appendLogEvent(_ event: LogEvent) async {
-        pendingLogEvents.append(event)
-        pendingLogTextBytes += event.message.utf8.count + event.rawText.utf8.count
+        let normalized = LogEvent(
+            id: nextLogEventID,
+            deviceTimestamp: event.deviceTimestamp,
+            receivedAt: event.receivedAt,
+            pid: event.pid,
+            tid: event.tid,
+            priority: event.priority,
+            androidTag: event.androidTag,
+            businessTag: event.businessTag,
+            message: event.message,
+            rawText: event.rawText,
+            parseStatus: event.parseStatus,
+            packageName: event.packageName,
+            processName: event.processName
+        )
+        nextLogEventID &+= 1
+        pendingLogEvents.append(normalized)
+        pendingLogTextBytes += normalized.message.utf8.count + normalized.rawText.utf8.count
         if pendingLogEvents.count >= 500 || pendingLogTextBytes >= 1_024 * 1_024 {
             await flushPendingLogEvents()
         } else {
@@ -242,16 +430,23 @@ final class AppModel: ObservableObject {
         pendingLogEvents.removeAll(keepingCapacity: true)
         pendingLogTextBytes = 0
         _ = await logBuffer.append(events)
-        logEvents = await logBuffer.snapshot(.all).events
+        if isLogPresentationPaused {
+            pendingLogEventCount += events.count
+        } else {
+            logEvents = await logBuffer.snapshot(.all).events
+        }
     }
 
-    private func resetLogStorage() {
+    private func resetLogStorage(resetEventIDs: Bool = true) {
         logFlushTask?.cancel()
         logFlushTask = nil
         pendingLogEvents.removeAll(keepingCapacity: false)
         pendingLogTextBytes = 0
-        logBuffer = LogRingBuffer(limits: cacheLimits)
+        logBuffer = LogRingBuffer(limits: cacheLimitsOverride ?? captureSettings.cacheLimits)
         logEvents = []
+        if resetEventIDs { nextLogEventID = 1 }
+        isLogPresentationPaused = false
+        pendingLogEventCount = 0
     }
 
     private func refreshAppSections() {

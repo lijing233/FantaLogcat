@@ -12,7 +12,7 @@ actor LogcatParser {
         let businessTag: String?
         var message: String
         var rawText: String
-        let parseStatus: LogParseStatus
+        var parseStatus: LogParseStatus
 
         var event: LogEvent {
             LogEvent(
@@ -44,13 +44,21 @@ actor LogcatParser {
     private let calendar: Calendar
     private let headerExpression: NSRegularExpression
     private let maxLineBytes: Int
+    private let maxEventTextBytes: Int
     private var byteRemainder = Data()
     private var nextID: UInt64 = 1
     private var pending: PendingEvent?
 
-    init(calendar: Calendar = .current, maxLineBytes: Int = 1_048_576) {
+    init(
+        calendar: Calendar = .current,
+        maxLineBytes: Int = 1_048_576,
+        maxEventTextBytes: Int = 64 * 1_024,
+        initialID: UInt64 = 1
+    ) {
         self.calendar = calendar
-        self.maxLineBytes = max(4, maxLineBytes)
+        self.maxEventTextBytes = max(4, maxEventTextBytes)
+        self.maxLineBytes = min(max(4, maxLineBytes), self.maxEventTextBytes)
+        nextID = initialID
         headerExpression = try! NSRegularExpression(pattern: Self.headerPattern)
     }
 
@@ -118,13 +126,35 @@ actor LogcatParser {
             pending = rawPendingEvent(line, receivedAt: receivedAt)
             nextID += 1
         } else {
-            pending?.message += "\n" + line
-            pending?.rawText += "\n" + line
+            appendContinuation(line, receivedAt: receivedAt, into: &emitted)
         }
     }
 
+    private func appendContinuation(
+        _ line: String,
+        receivedAt: Date,
+        into emitted: inout [LogEvent]
+    ) {
+        guard var pending else {
+            self.pending = rawPendingEvent(line, receivedAt: receivedAt)
+            nextID += 1
+            return
+        }
+        let appendedRawTextBytes = pending.rawText.utf8.count + 1 + line.utf8.count
+        guard appendedRawTextBytes <= maxEventTextBytes else {
+            pending.parseStatus = .partial
+            emitted.append(pending.event)
+            self.pending = rawPendingEvent(line, receivedAt: receivedAt)
+            nextID += 1
+            return
+        }
+        pending.message += "\n" + line
+        pending.rawText += "\n" + line
+        self.pending = pending
+    }
+
     private func emitOversizedPrefix(receivedAt: Date, into emitted: inout [LogEvent]) {
-        var length = maxLineBytes
+        var length = min(maxLineBytes, maxEventTextBytes)
         while length > 0 {
             let boundary = byteRemainder.index(byteRemainder.startIndex, offsetBy: length)
             if byteRemainder[boundary] & 0xC0 != 0x80 { break }

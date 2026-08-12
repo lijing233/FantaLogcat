@@ -61,6 +61,10 @@ final class ADBRuntimeTests: XCTestCase {
             ADBCommand.logcatThreadtime(serial, pids: [42, 43]).arguments,
             ["-s", "ABC123", "logcat", "-v", "threadtime", "--pid=42", "--pid=43"]
         )
+        XCTAssertEqual(
+            ADBCommand.logcatSnapshotThreadtime(serial, pids: [42], lineCount: 900).arguments,
+            ["-s", "ABC123", "logcat", "-d", "-t", "500", "-v", "threadtime", "--pid=42"]
+        )
     }
 
     func testRejectsInvalidValidatedValues() {

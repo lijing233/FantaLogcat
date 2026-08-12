@@ -88,6 +88,7 @@ enum ADBCommand: Sendable, Equatable {
     case applicationLabel(ADBDeviceSerial, AndroidPackageName)
     case resolvePIDs(ADBDeviceSerial, AndroidPackageName)
     case startApplication(ADBDeviceSerial, AndroidPackageName)
+    case logcatSnapshotThreadtime(ADBDeviceSerial, pids: [Int32], lineCount: Int)
     case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
 
     var arguments: [String] {
@@ -114,6 +115,9 @@ enum ADBCommand: Sendable, Equatable {
         case .startApplication(let serial, let package):
             ["-s", serial.value, "shell", "monkey", "-p", package.value,
              "-c", "android.intent.category.LAUNCHER", "1"]
+        case .logcatSnapshotThreadtime(let serial, let pids, let lineCount):
+            ["-s", serial.value, "logcat", "-d", "-t", "\(min(max(lineCount, 1), 500))", "-v", "threadtime"]
+                + pids.map { "--pid=\($0)" }
         case .logcatThreadtime(let serial, let pids):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
                 + pids.map { "--pid=\($0)" }

@@ -47,7 +47,7 @@ final class AppCatalogTests: XCTestCase {
         XCTAssertEqual(processes.map(\.pid), [42, 43])
     }
 
-    func testGenericAppUsesAndroidApplicationLabel() async throws {
+    func testGenericAppUsesPackageNameWithoutExtraADBLabelLookup() async throws {
         let catalog = AppCatalog(adb: StubAppADB(
             packages: ["com.game.tile"],
             processOutput: "",
@@ -59,34 +59,7 @@ final class AppCatalogTests: XCTestCase {
 
         let apps = try await catalog.listApps(on: device)
 
-        XCTAssertEqual(apps.first?.presentation.displayName, "Tile Match")
-    }
-
-    func testApplicationLabelLookupsUseAtMostFourConcurrentADBCommands() async throws {
-        let packages = (1...9).map { "com.game.app\($0)" }
-        let adb = ConcurrentLabelADB(packages: packages)
-        let catalog = AppCatalog(adb: adb)
-        let device = DeviceDescriptor(
-            serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb
-        )
-
-        _ = try await catalog.listApps(on: device)
-
-        XCTAssertLessThanOrEqual(adb.maximumConcurrentLabelLookups, 4)
-    }
-
-    func testApplicationLabelResultsAreCachedForTheCurrentRun() async throws {
-        let packages = (1...3).map { "com.game.app\($0)" }
-        let adb = ConcurrentLabelADB(packages: packages)
-        let catalog = AppCatalog(adb: adb)
-        let device = DeviceDescriptor(
-            serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb
-        )
-
-        _ = try await catalog.listApps(on: device)
-        _ = try await catalog.listApps(on: device)
-
-        XCTAssertEqual(adb.labelLookupCount, packages.count)
+        XCTAssertEqual(apps.first?.presentation.displayName, "com.game.tile")
     }
 }
 
@@ -113,48 +86,6 @@ private struct StubAppADB: ADBRuntimeProtocol {
             return .success(stdout: processOutput)
         case .applicationLabel(_, let packageName):
             return .success(stdout: applicationLabels[packageName.value].map { "application-label:'\($0)'" } ?? "")
-        default:
-            return .success()
-        }
-    }
-
-    func stream(_ command: ADBCommand) throws -> AsyncThrowingStream<ProcessOutput, Error> {
-        AsyncThrowingStream { $0.finish() }
-    }
-}
-
-private final class ConcurrentLabelADB: ADBRuntimeProtocol, @unchecked Sendable {
-    private let packages: [String]
-    private let lock = NSLock()
-    private var activeLabelLookups = 0
-    private var recordedMaximumConcurrentLabelLookups = 0
-    private var recordedLabelLookupCount = 0
-
-    var maximumConcurrentLabelLookups: Int {
-        lock.withLock { recordedMaximumConcurrentLabelLookups }
-    }
-
-    var labelLookupCount: Int {
-        lock.withLock { recordedLabelLookupCount }
-    }
-
-    init(packages: [String]) {
-        self.packages = packages
-    }
-
-    func run(_ command: ADBCommand, timeout: Duration) async throws -> ProcessResult {
-        switch command {
-        case .listThirdPartyPackages:
-            return .success(stdout: packages.map { "package:\($0)" }.joined(separator: "\n"))
-        case .applicationLabel(_, let packageName):
-            lock.withLock {
-                activeLabelLookups += 1
-                recordedLabelLookupCount += 1
-                recordedMaximumConcurrentLabelLookups = max(recordedMaximumConcurrentLabelLookups, activeLabelLookups)
-            }
-            try await Task.sleep(for: .milliseconds(20))
-            lock.withLock { activeLabelLookups -= 1 }
-            return .success(stdout: "application-label:'\(packageName.value)'")
         default:
             return .success()
         }

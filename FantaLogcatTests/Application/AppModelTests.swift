@@ -103,6 +103,35 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedDevice, device)
     }
 
+    func testConnectionMonitorReturnsToDeviceSelectionAndRecoversAutomatically() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let service = AppModelSequencedDeviceService(states: [.connected(device), .noDevice, .connected(device)])
+        let model = AppModel(environment: .test(
+            installer: AppModelInstaller(initialState: .ready(installation)),
+            deviceService: service
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingDevice)
+        XCTAssertEqual(model.deviceConnection, .noDevice)
+
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+        XCTAssertEqual(model.selectedDevice, device)
+    }
+
     func testSelectingAppStartsLogStreamAndPublishesEvents() async throws {
         let installation = ADBInstallation(
             version: "37.0.0",
@@ -148,6 +177,32 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.phase, .viewingLogs)
         XCTAssertEqual(model.logEvents, [event])
+    }
+
+    func testSelectingAppPublishesRecentEventsBeforeLiveEvents() async throws {
+        let installation = ADBInstallation(version: "37.0.0", executableURL: URL(fileURLWithPath: "/managed/adb"))
+        let device = DeviceDescriptor(serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb)
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let history = LogEvent.fixture(id: 1, message: "startup")
+        let live = LogEvent.fixture(id: 2, message: "ready")
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app], processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]) },
+            makeLogSession: { _ in AppModelLogSession(events: [live], recentEvents: [history]) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.selectApp(app)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(model.logEvents.map(\.message), ["startup", "ready"])
     }
 
     func testSelectingAppEvictsOldLogsWhenTheTextByteLimitIsReached() async throws {
@@ -199,6 +254,73 @@ final class AppModelTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(50))
 
         XCTAssertEqual(model.logEvents.map(\.id), [2, 3])
+    }
+
+    func testPausingPresentationStillRetainsNewEventsUntilResume() async throws {
+        let installation = ADBInstallation(version: "37.0.0", executableURL: URL(fileURLWithPath: "/managed/adb"))
+        let device = DeviceDescriptor(serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb)
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let session = AppModelControlledLogSession()
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+            makeLogSession: { _ in session },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.selectApp(app)
+        try await Task.sleep(for: .milliseconds(20))
+        session.emit(.fixture(id: 1, message: "first"))
+        try await Task.sleep(for: .milliseconds(120))
+        model.pauseLogPresentation()
+        session.emit(.fixture(id: 2, message: "later"))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(model.logEvents.map(\.id), [1])
+        XCTAssertEqual(model.pendingLogEventCount, 1)
+
+        await model.resumeLogPresentation()
+
+        XCTAssertEqual(model.logEvents.map(\.id), [1, 2])
+        XCTAssertEqual(model.pendingLogEventCount, 0)
+    }
+
+    func testKeywordAndLevelSelectionPublishOnlyMatchingEvents() async throws {
+        let installation = ADBInstallation(version: "37.0.0", executableURL: URL(fileURLWithPath: "/managed/adb"))
+        let device = DeviceDescriptor(serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb)
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let events: [LogEvent] = [
+            .fixture(id: 1, priority: .warning, androidTag: "Unity", message: "warning"),
+            .fixture(id: 2, priority: .error, androidTag: "SDK", message: "failure"),
+            .fixture(id: 3, priority: .error, androidTag: "Unity", message: "failure")
+        ]
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+            makeLogSession: { _ in AppModelLogSession(events: events) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.selectApp(app)
+        try await Task.sleep(for: .milliseconds(50))
+        model.setLogLevels([.error])
+        model.setLogKeyword("Unity")
+
+        XCTAssertEqual(model.filteredLogEvents.map(\.id), [3])
     }
 
     func testSelectionRecordsRecentAndFavoriteSectionsOnlyContainInstalledApps() async throws {
@@ -277,6 +399,19 @@ private actor AppModelDeviceService: DeviceServiceProtocol {
     func refresh() async throws -> DeviceConnectionState { state }
 }
 
+private actor AppModelSequencedDeviceService: DeviceServiceProtocol {
+    private var states: [DeviceConnectionState]
+
+    init(states: [DeviceConnectionState]) {
+        self.states = states
+    }
+
+    func refresh() async throws -> DeviceConnectionState {
+        guard !states.isEmpty else { return .noDevice }
+        return states.removeFirst()
+    }
+}
+
 private actor AppModelAppCatalog: AppCatalogProtocol {
     let apps: [AppDescriptor]
     let processes: [ProcessDescriptor]
@@ -292,15 +427,40 @@ private actor AppModelAppCatalog: AppCatalogProtocol {
 
 private struct AppModelLogSession: LogSessionProtocol {
     let emittedEvents: [LogEvent]
+    let recordedEvents: [LogEvent]
 
-    init(events: [LogEvent]) {
+    init(events: [LogEvent], recentEvents: [LogEvent] = []) {
         emittedEvents = events
+        recordedEvents = recentEvents
+    }
+
+    func recentEvents(on device: DeviceDescriptor, pids: [Int32], limit: Int) async throws -> [LogEvent] {
+        recordedEvents
     }
 
     func events(on device: DeviceDescriptor, pids: [Int32]) throws -> AsyncThrowingStream<LogEvent, Error> {
         AsyncThrowingStream { continuation in
             emittedEvents.forEach { continuation.yield($0) }
             continuation.finish()
+        }
+    }
+}
+
+private final class AppModelControlledLogSession: LogSessionProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncThrowingStream<LogEvent, Error>.Continuation?
+
+    func events(on device: DeviceDescriptor, pids: [Int32]) throws -> AsyncThrowingStream<LogEvent, Error> {
+        AsyncThrowingStream { continuation in
+            lock.withLock {
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func emit(_ event: LogEvent) {
+        lock.withLock {
+            continuation?.yield(event)
         }
     }
 }

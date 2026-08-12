@@ -8,6 +8,7 @@ struct FantaLogcatApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .environment(\.locale, Locale(identifier: model.language.localeIdentifier))
         }
     }
 }

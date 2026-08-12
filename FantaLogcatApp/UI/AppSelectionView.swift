@@ -28,7 +28,11 @@ struct AppSelectionView: View {
                 searchField
 
                 if model.availableApps.isEmpty {
-                    emptyInstalledApps
+                    if model.isLoadingApps {
+                        loadingInstalledApps
+                    } else {
+                        emptyInstalledApps
+                    }
                 } else if hasSearch {
                     searchSection
                 } else {
@@ -45,9 +49,9 @@ struct AppSelectionView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Choose an app")
+                Text(model.copy("选择应用", "Choose an app"))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("Start with an app you use often, or search by its application ID.")
+                Text(model.copy("从常用应用开始，或按应用 ID 搜索。", "Start with an app you use often, or search by its application ID."))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -55,9 +59,16 @@ struct AppSelectionView: View {
             Button {
                 Task { await model.loadApps() }
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label(model.copy("刷新", "Refresh"), systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
+            Button {
+                model.isShowingSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(model.copy("设置", "Settings"))
         }
     }
 
@@ -65,7 +76,7 @@ struct AppSelectionView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search app name or application ID", text: $search)
+            TextField(model.copy("搜索应用名称或应用 ID", "Search app name or application ID"), text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
             if !search.isEmpty {
@@ -104,9 +115,9 @@ struct AppSelectionView: View {
 
         if model.recentApps.isEmpty && model.favoriteApps.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Choose your first app")
+                Text(model.copy("选择第一个应用", "Choose your first app"))
                     .font(.headline)
-                Text("Search for a game or application ID, or browse the installed apps below.")
+                Text(model.copy("搜索游戏名称或应用 ID，也可以浏览下方已安装应用。", "Search for a game or application ID, or browse the installed apps below."))
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 10)
@@ -126,7 +137,7 @@ struct AppSelectionView: View {
                 .padding(.top, 10)
             }
         } label: {
-            Label("Browse all installed apps", systemImage: "square.grid.2x2")
+            Label(model.copy("浏览全部已安装应用", "Browse all installed apps"), systemImage: "square.grid.2x2")
                 .font(.headline)
         }
         .padding(.top, 6)
@@ -160,9 +171,22 @@ struct AppSelectionView: View {
             Image(systemName: "app.dashed")
                 .font(.system(size: 32))
                 .foregroundStyle(.secondary)
-            Text("No third-party apps found")
+            Text(model.copy("没有找到第三方应用", "No third-party apps found"))
                 .font(.headline)
-            Text("Install or open an app on the selected device, then refresh this list.")
+            Text(model.copy("请在所选设备安装或打开应用后再刷新。", "Install or open an app on the selected device, then refresh this list."))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 72)
+    }
+
+    private var loadingInstalledApps: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+            Text(model.copy("正在读取已安装应用…", "Loading installed apps…"))
+                .font(.headline)
+            Text(model.copy("首次读取可能需要几秒钟。", "The first scan can take a few seconds."))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)

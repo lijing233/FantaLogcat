@@ -8,7 +8,6 @@ protocol AppCatalogProtocol: Sendable {
 actor AppCatalog: AppCatalogProtocol {
     private let adb: any ADBRuntimeProtocol
     private let presets: [AppPreset]
-    private var applicationLabelCache: [String: String] = [:]
 
     init(adb: any ADBRuntimeProtocol, presets: [AppPreset] = []) {
         self.adb = adb
@@ -25,10 +24,6 @@ actor AppCatalog: AppCatalogProtocol {
                 guard let packageName = try? AndroidPackageName(raw) else { return nil }
                 return (packageName, known[raw])
             }
-        let labels = await applicationLabels(
-            for: descriptors.compactMap { $0.1 == nil ? $0.0 : nil },
-            on: device
-        )
         let resolved = descriptors.map { packageName, preset -> AppDescriptor in
             if let preset {
                 return AppDescriptor(packageName: packageName, presentation: AppPresentation(
@@ -36,7 +31,7 @@ actor AppCatalog: AppCatalogProtocol {
                 ))
             }
             return AppDescriptor(packageName: packageName, presentation: AppPresentation(
-                displayName: labels[packageName.value] ?? packageName.value,
+                displayName: packageName.value,
                 symbolName: nil,
                 provenance: .generic
             ))
@@ -51,56 +46,6 @@ actor AppCatalog: AppCatalogProtocol {
             default: return left.presentation.displayName.localizedStandardCompare(right.presentation.displayName) == .orderedAscending
             }
         }
-    }
-
-    private func applicationLabels(
-        for packages: [AndroidPackageName],
-        on device: DeviceDescriptor
-    ) async -> [String: String] {
-        let uncachedPackages = packages.filter { applicationLabelCache[$0.value] == nil }
-        let lookup: @Sendable (AndroidPackageName) async -> (String, String?) = { [adb] packageName in
-            let label = try? await adb.run(
-                .applicationLabel(device.serial, packageName),
-                timeout: .seconds(2)
-            )
-            let text = label.map { String(decoding: $0.stdout, as: UTF8.self) }
-            return (packageName.value, text.flatMap(Self.applicationLabel))
-        }
-        let resolved = await withTaskGroup(of: (String, String?).self, returning: [String: String].self) { group in
-            var iterator = uncachedPackages.makeIterator()
-            for _ in 0..<min(4, packages.count) {
-                guard let packageName = iterator.next() else { break }
-                group.addTask { await lookup(packageName) }
-            }
-            var results: [String: String] = [:]
-            while let (packageName, label) = await group.next() {
-                if let label { results[packageName] = label }
-                if let nextPackage = iterator.next() {
-                    group.addTask { await lookup(nextPackage) }
-                }
-            }
-            return results
-        }
-        applicationLabelCache.merge(resolved, uniquingKeysWith: { _, new in new })
-        return packages.reduce(into: [:]) { labels, packageName in
-            if let label = applicationLabelCache[packageName.value] {
-                labels[packageName.value] = label
-            }
-        }
-    }
-
-    private static func applicationLabel(in output: String) -> String? {
-        for line in output.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("application-label:") else { continue }
-            let raw = String(trimmed.dropFirst("application-label:".count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-            guard !raw.isEmpty,
-                  !raw.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { continue }
-            return raw
-        }
-        return nil
     }
 
     func resolveProcesses(packageName: AndroidPackageName, on device: DeviceDescriptor) async throws -> [ProcessDescriptor] {

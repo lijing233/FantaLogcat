@@ -21,6 +21,10 @@ struct RootView: View {
             await model.prepareADB()
             await model.refreshDevices()
         }
+        .sheet(isPresented: $model.isShowingSettings) {
+            SettingsView()
+                .environmentObject(model)
+        }
     }
 }
 

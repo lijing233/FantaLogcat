@@ -178,4 +178,25 @@ final class LogcatParserTests: XCTestCase {
         XCTAssertEqual(events.first?.message, "valid")
         XCTAssertEqual(events.last?.rawText, "02-31 12:00:00.123  42  43 E Unity: impossible")
     }
+
+    func testLongContinuationNeverBuildsAnUnboundedPendingEvent() async {
+        let parser = LogcatParser(
+            calendar: FixtureFactory.utcCalendar,
+            maxLineBytes: 1_024,
+            maxEventTextBytes: 64
+        )
+        let input = "08-11 12:00:00.123  42  43 E Unity: first\n"
+            + String(repeating: "continuation\n", count: 20)
+
+        let emitted = await parser.consume(
+            Data(input.utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+        let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+        let events = emitted + tail
+
+        XCTAssertGreaterThan(events.count, 1)
+        XCTAssertTrue(events.contains { $0.parseStatus == .partial })
+        XCTAssertTrue(events.allSatisfy { $0.rawText.utf8.count <= 64 })
+    }
 }
