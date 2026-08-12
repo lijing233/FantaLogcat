@@ -24,6 +24,11 @@ mkdir -p "$fixture_app/Contents/MacOS" "$mount_point"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$fixture_app/Contents/MacOS/FantaLogcat"
 chmod +x "$fixture_app/Contents/MacOS/FantaLogcat"
 
+if VOLUME_NAME='../unsafe' "$creator" "$fixture_app" "$fixture_dmg" >/dev/null 2>&1; then
+  printf '%s\n' 'DMG fixture check failed: unsafe volume name was accepted' >&2
+  exit 1
+fi
+
 "$creator" "$fixture_app" "$fixture_dmg"
 hdiutil verify "$fixture_dmg" >/dev/null
 hdiutil attach "$fixture_dmg" -readonly -nobrowse -mountpoint "$mount_point" -quiet
@@ -33,5 +38,13 @@ is_mounted=true
 [ -x "$mount_point/FantaLogcat.app/Contents/MacOS/FantaLogcat" ]
 [ -L "$mount_point/Applications" ]
 [ "$(readlink "$mount_point/Applications")" = /Applications ]
+[ -s "$mount_point/.background/background.png" ] || {
+  printf '%s\n' 'DMG fixture check failed: background image is missing' >&2
+  exit 1
+}
+[ -s "$mount_point/.DS_Store" ] || {
+  printf '%s\n' 'DMG fixture check failed: Finder layout is missing' >&2
+  exit 1
+}
 
 printf '%s\n' 'DMG fixture checks passed'
