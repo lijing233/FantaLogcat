@@ -41,7 +41,7 @@ struct ADBDeviceSerial: Sendable, Equatable {
     }
 }
 
-struct AndroidPackageName: Sendable, Equatable {
+struct AndroidPackageName: Sendable, Equatable, Codable {
     let value: String
 
     init(_ value: String) throws {
@@ -51,6 +51,19 @@ struct AndroidPackageName: Sendable, Equatable {
             throw ADBValidationError.invalidPackageName
         }
         self.value = value
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        guard let packageName = try? AndroidPackageName(value) else {
+            throw DecodingError.dataCorruptedError(in: try decoder.singleValueContainer(), debugDescription: "Invalid Android package name")
+        }
+        self = packageName
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
     }
 }
 
@@ -91,7 +104,7 @@ enum ADBCommand: Sendable, Equatable {
         case .listThirdPartyPackages(let serial):
             ["-s", serial.value, "shell", "pm", "list", "packages", "-3"]
         case .resolvePIDs(let serial, let package):
-            ["-s", serial.value, "shell", "pidof", package.value]
+            ["-s", serial.value, "shell", "ps", "-A", "-o", "PID,NAME"]
         case .startApplication(let serial, let package):
             ["-s", serial.value, "shell", "monkey", "-p", package.value,
              "-c", "android.intent.category.LAUNCHER", "1"]

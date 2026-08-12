@@ -11,7 +11,7 @@ struct RootView: View {
             case .selectingDevice:
                 DeviceSelectionView()
             case .selectingApp:
-                Text("Select an app")
+                AppSelectionView()
             case .viewingLogs:
                 Text("Viewing logs")
             }

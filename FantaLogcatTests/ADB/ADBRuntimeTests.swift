@@ -48,7 +48,7 @@ final class ADBRuntimeTests: XCTestCase {
 
         XCTAssertEqual(
             ADBCommand.resolvePIDs(serial, package).arguments,
-            ["-s", "ABC123", "shell", "pidof", "com.example.game"]
+            ["-s", "ABC123", "shell", "ps", "-A", "-o", "PID,NAME"]
         )
         XCTAssertEqual(
             ADBCommand.logcatThreadtime(serial, pids: [42, 43]).arguments,

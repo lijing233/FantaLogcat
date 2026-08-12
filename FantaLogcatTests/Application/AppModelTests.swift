@@ -55,6 +55,7 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(environment: AppEnvironment(
             makeADBInstaller: { throw ADBInstallerError.fileOperationFailed },
             makeDeviceService: { _ in AppModelDeviceService(state: .noDevice) },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         ))
 
@@ -136,4 +137,9 @@ private actor AppModelDeviceService: DeviceServiceProtocol {
     }
 
     func refresh() async throws -> DeviceConnectionState { state }
+}
+
+private actor AppModelAppCatalog: AppCatalogProtocol {
+    func listApps(on device: DeviceDescriptor) async throws -> [AppDescriptor] { [] }
+    func resolveProcesses(packageName: AndroidPackageName, on device: DeviceDescriptor) async throws -> [ProcessDescriptor] { [] }
 }

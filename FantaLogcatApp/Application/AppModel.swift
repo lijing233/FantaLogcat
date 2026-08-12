@@ -25,10 +25,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var adbPreparation: ADBPreparationState = .checking
     @Published private(set) var deviceConnection: DeviceConnectionState = .scanning
     @Published private(set) var selectedDevice: DeviceDescriptor?
+    @Published private(set) var availableApps: [AppDescriptor] = []
+    @Published private(set) var selectedApp: AppDescriptor?
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
     private var deviceService: (any DeviceServiceProtocol)?
+    private var appCatalog: (any AppCatalogProtocol)?
     private var retryOperation: RetryOperation = .check
 
     init(environment: AppEnvironment) {
@@ -94,6 +97,7 @@ final class AppModel: ObservableObject {
             if case .connected(let device) = state {
                 selectedDevice = device
                 phase = .selectingApp
+                await loadApps()
             }
         } catch {
             deviceConnection = .failed(errorCode(error))
@@ -105,6 +109,19 @@ final class AppModel: ObservableObject {
         selectedDevice = device
         deviceConnection = .connected(device)
         phase = .selectingApp
+        Task { await loadApps() }
+    }
+
+    func loadApps() async {
+        guard phase == .selectingApp, let selectedDevice else { return }
+        guard let appCatalog else { return }
+        do { availableApps = try await appCatalog.listApps(on: selectedDevice) }
+        catch { availableApps = [] }
+    }
+
+    func selectApp(_ app: AppDescriptor) {
+        selectedApp = app
+        phase = .viewingLogs
     }
 
     private func resolveInstaller() throws -> any ADBInstalling {
@@ -117,6 +134,9 @@ final class AppModel: ObservableObject {
     private func resolveDeviceService(for installation: ADBInstallation) {
         if deviceService == nil {
             deviceService = environment.makeDeviceService(installation)
+        }
+        if appCatalog == nil {
+            appCatalog = environment.makeAppCatalog(installation)
         }
     }
 
