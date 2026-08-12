@@ -54,6 +54,7 @@ final class AppModelTests: XCTestCase {
     func testRetryAfterPreparationFailureChecksAgainWithoutInstalling() async {
         let model = AppModel(environment: AppEnvironment(
             makeADBInstaller: { throw ADBInstallerError.fileOperationFailed },
+            makeDeviceService: { _ in AppModelDeviceService(state: .noDevice) },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         ))
 
@@ -75,6 +76,28 @@ final class AppModelTests: XCTestCase {
         let installCalls = await installer.installCalls
         XCTAssertEqual(installCalls, 2)
         XCTAssertEqual(model.adbPreparation, .failed("checksum_mismatch"))
+    }
+
+    func testSingleDeviceAutomaticallyAdvancesToApplicationSelection() async {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try! ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let model = AppModel(environment: .test(
+            installer: AppModelInstaller(initialState: .ready(installation)),
+            deviceService: AppModelDeviceService(state: .connected(device))
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+        XCTAssertEqual(model.selectedDevice, device)
     }
 }
 
@@ -103,4 +126,14 @@ private actor AppModelInstaller: ADBInstalling {
     func rollback() throws -> ADBInstallation {
         throw ADBInstallerError.noRollbackAvailable
     }
+}
+
+private actor AppModelDeviceService: DeviceServiceProtocol {
+    let state: DeviceConnectionState
+
+    init(state: DeviceConnectionState) {
+        self.state = state
+    }
+
+    func refresh() async throws -> DeviceConnectionState { state }
 }

@@ -2,6 +2,7 @@ import Foundation
 
 struct AppEnvironment: Sendable {
     let makeADBInstaller: @Sendable () throws -> any ADBInstalling
+    let makeDeviceService: @Sendable (ADBInstallation) -> any DeviceServiceProtocol
     let adbLicenseURL: URL
 
     static let production = AppEnvironment(
@@ -29,13 +30,24 @@ struct AppEnvironment: Sendable {
                 verifier: RuntimeADBVersionVerifier(runner: runner)
             )
         },
+        makeDeviceService: { installation in
+            DeviceService(adb: ADBRuntime(
+                executableURL: installation.executableURL,
+                runner: FoundationProcessRunner()
+            ))
+        },
         adbLicenseURL: URL(string: "https://developer.android.com/studio/terms")!
     )
 
-    static func test(installer: (any ADBInstalling)? = nil) -> AppEnvironment {
+    static func test(
+        installer: (any ADBInstalling)? = nil,
+        deviceService: (any DeviceServiceProtocol)? = nil
+    ) -> AppEnvironment {
         let resolved = installer ?? TestADBInstaller()
+        let resolvedDeviceService = deviceService ?? TestDeviceService()
         return AppEnvironment(
             makeADBInstaller: { resolved },
+            makeDeviceService: { _ in resolvedDeviceService },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         )
     }
@@ -49,6 +61,10 @@ struct AppEnvironment: Sendable {
         }
         return url
     }
+}
+
+private actor TestDeviceService: DeviceServiceProtocol {
+    func refresh() async throws -> DeviceConnectionState { .noDevice }
 }
 
 private actor TestADBInstaller: ADBInstalling {

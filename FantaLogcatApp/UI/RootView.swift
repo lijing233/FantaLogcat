@@ -9,7 +9,7 @@ struct RootView: View {
             case .preparingADB:
                 ADBPreparationView()
             case .selectingDevice:
-                Text("Select a device")
+                DeviceSelectionView()
             case .selectingApp:
                 Text("Select an app")
             case .viewingLogs:
@@ -19,6 +19,7 @@ struct RootView: View {
         .frame(minWidth: 920, minHeight: 600)
         .task {
             await model.prepareADB()
+            await model.refreshDevices()
         }
     }
 }

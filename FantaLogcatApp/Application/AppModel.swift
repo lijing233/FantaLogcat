@@ -23,9 +23,12 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var phase: AppPhase = .preparingADB
     @Published private(set) var adbPreparation: ADBPreparationState = .checking
+    @Published private(set) var deviceConnection: DeviceConnectionState = .scanning
+    @Published private(set) var selectedDevice: DeviceDescriptor?
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
+    private var deviceService: (any DeviceServiceProtocol)?
     private var retryOperation: RetryOperation = .check
 
     init(environment: AppEnvironment) {
@@ -41,7 +44,8 @@ final class AppModel: ObservableObject {
             switch await installer.state() {
             case .notInstalled:
                 adbPreparation = .licenseRequired
-            case .ready:
+            case .ready(let installation):
+                resolveDeviceService(for: installation)
                 phase = .selectingDevice
             }
         } catch {
@@ -59,8 +63,10 @@ final class AppModel: ObservableObject {
         adbPreparation = .installing
         do {
             let installer = try resolveInstaller()
-            _ = try await installer.install(acceptingLicense: true)
+            let installation = try await installer.install(acceptingLicense: true)
+            resolveDeviceService(for: installation)
             phase = .selectingDevice
+            await refreshDevices()
         } catch {
             adbPreparation = .failed(errorCode(error))
         }
@@ -75,11 +81,43 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshDevices() async {
+        guard phase == .selectingDevice else { return }
+        deviceConnection = .scanning
+        do {
+            guard let deviceService else {
+                deviceConnection = .failed("device_service_unavailable")
+                return
+            }
+            let state = try await deviceService.refresh()
+            deviceConnection = state
+            if case .connected(let device) = state {
+                selectedDevice = device
+                phase = .selectingApp
+            }
+        } catch {
+            deviceConnection = .failed(errorCode(error))
+        }
+    }
+
+    func selectDevice(_ device: DeviceDescriptor) {
+        guard phase == .selectingDevice else { return }
+        selectedDevice = device
+        deviceConnection = .connected(device)
+        phase = .selectingApp
+    }
+
     private func resolveInstaller() throws -> any ADBInstalling {
         if let adbInstaller { return adbInstaller }
         let installer = try environment.makeADBInstaller()
         adbInstaller = installer
         return installer
+    }
+
+    private func resolveDeviceService(for installation: ADBInstallation) {
+        if deviceService == nil {
+            deviceService = environment.makeDeviceService(installation)
+        }
     }
 
     private func errorCode(_ error: Error) -> String {
