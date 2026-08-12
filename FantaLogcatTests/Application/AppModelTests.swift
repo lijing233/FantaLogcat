@@ -173,7 +173,7 @@ final class AppModelTests: XCTestCase {
         await model.prepareADB()
         await model.refreshDevices()
         model.selectApp(app)
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil { model.logEvents == [event] }
 
         XCTAssertEqual(model.phase, .viewingLogs)
         XCTAssertEqual(model.logEvents, [event])
@@ -200,7 +200,7 @@ final class AppModelTests: XCTestCase {
         await model.prepareADB()
         await model.refreshDevices()
         model.selectApp(app)
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil { model.logEvents.map(\.message) == ["startup", "ready"] }
 
         XCTAssertEqual(model.logEvents.map(\.message), ["startup", "ready"])
     }
@@ -240,7 +240,12 @@ final class AppModelTests: XCTestCase {
             environment: AppEnvironment(
                 makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
                 makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
-                makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+                makeAppCatalog: { _ in
+                    AppModelAppCatalog(
+                        apps: [app],
+                        processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]
+                    )
+                },
                 makeLogSession: { _ in AppModelLogSession(events: events) },
                 makeAppSelectionStore: { InMemoryAppSelectionStore() },
                 adbLicenseURL: URL(string: "https://example.com/terms")!
@@ -251,7 +256,7 @@ final class AppModelTests: XCTestCase {
         await model.prepareADB()
         await model.refreshDevices()
         model.selectApp(app)
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil { model.logEvents.map(\.id) == [2, 3] }
 
         XCTAssertEqual(model.logEvents.map(\.id), [2, 3])
     }
@@ -267,7 +272,12 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(environment: AppEnvironment(
             makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
             makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
-            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+            makeAppCatalog: { _ in
+                AppModelAppCatalog(
+                    apps: [app],
+                    processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]
+                )
+            },
             makeLogSession: { _ in session },
             makeAppSelectionStore: { InMemoryAppSelectionStore() },
             adbLicenseURL: URL(string: "https://example.com/terms")!
@@ -276,12 +286,12 @@ final class AppModelTests: XCTestCase {
         await model.prepareADB()
         await model.refreshDevices()
         model.selectApp(app)
-        try await Task.sleep(for: .milliseconds(20))
+        await waitUntil { session.hasSubscriber }
         session.emit(.fixture(id: 1, message: "first"))
-        try await Task.sleep(for: .milliseconds(120))
+        await waitUntil { model.logEvents.map(\.id) == [1] }
         model.pauseLogPresentation()
         session.emit(.fixture(id: 2, message: "later"))
-        try await Task.sleep(for: .milliseconds(120))
+        await waitUntil { model.pendingLogEventCount == 1 }
 
         XCTAssertEqual(model.logEvents.map(\.id), [1])
         XCTAssertEqual(model.pendingLogEventCount, 1)
@@ -307,7 +317,12 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(environment: AppEnvironment(
             makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
             makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
-            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app]) },
+            makeAppCatalog: { _ in
+                AppModelAppCatalog(
+                    apps: [app],
+                    processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]
+                )
+            },
             makeLogSession: { _ in AppModelLogSession(events: events) },
             makeAppSelectionStore: { InMemoryAppSelectionStore() },
             adbLicenseURL: URL(string: "https://example.com/terms")!
@@ -316,7 +331,7 @@ final class AppModelTests: XCTestCase {
         await model.prepareADB()
         await model.refreshDevices()
         model.selectApp(app)
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil { model.logEvents.count == events.count }
         model.setLogLevels([.error])
         model.setLogKeyword("Unity")
 
@@ -353,12 +368,28 @@ final class AppModelTests: XCTestCase {
 
         await model.prepareADB()
         await model.refreshDevices()
+        await waitUntil { model.availableApps == [tile, other] }
         model.toggleFavorite(other)
         model.selectApp(tile)
 
         XCTAssertEqual(model.recentApps.map(\.id), [tile.id])
         XCTAssertEqual(model.favoriteApps.map(\.id), [other.id])
         XCTAssertTrue(model.isFavorite(other))
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(1),
+        condition: @escaping @MainActor () -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !condition() {
+            guard clock.now < deadline else {
+                XCTFail("Condition was not satisfied before timeout")
+                return
+            }
+            await Task.yield()
+        }
     }
 }
 
@@ -450,6 +481,10 @@ private final class AppModelControlledLogSession: LogSessionProtocol, @unchecked
     private let lock = NSLock()
     private var continuation: AsyncThrowingStream<LogEvent, Error>.Continuation?
 
+    var hasSubscriber: Bool {
+        lock.withLock { continuation != nil }
+    }
+
     func events(on device: DeviceDescriptor, pids: [Int32]) throws -> AsyncThrowingStream<LogEvent, Error> {
         AsyncThrowingStream { continuation in
             lock.withLock {
@@ -459,7 +494,7 @@ private final class AppModelControlledLogSession: LogSessionProtocol, @unchecked
     }
 
     func emit(_ event: LogEvent) {
-        lock.withLock {
+        _ = lock.withLock {
             continuation?.yield(event)
         }
     }
