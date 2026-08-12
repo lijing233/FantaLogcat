@@ -16,7 +16,12 @@ struct SettingsView: View {
 
             Picker(copy("Interface language"), selection: $draft.language) {
                 ForEach(AppLanguage.allCases) { language in
-                    Text(language.displayName).tag(language)
+                    Text(
+                        language == .chinese
+                            ? copy("Simplified Chinese")
+                            : copy("English")
+                    )
+                    .tag(language)
                 }
             }
             .pickerStyle(.segmented)
