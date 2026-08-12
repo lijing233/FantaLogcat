@@ -6,21 +6,19 @@ final class InteractionUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-    }
-
-    override func tearDownWithError() throws {
-        app.terminate()
-        app = nil
     }
 
     func testClosingSettingsDiscardsLanguageChange() {
+        app = XCUIApplication()
+        defer { app.terminate() }
         launchSettings(reset: true)
 
         let english = languageOption("settings.language.english")
+        let language = languagePicker
+        XCTAssertTrue(language.waitForExistence(timeout: 5))
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
-        XCTAssertTrue(waitUntilSelected(english))
+        XCTAssertTrue(waitForLanguage("english", in: language))
 
         let close = app.buttons["settings.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
@@ -29,18 +27,22 @@ final class InteractionUITests: XCTestCase {
         app.terminate()
         launchSettings(reset: false)
 
-        let chinese = languageOption("settings.language.chinese")
-        XCTAssertTrue(chinese.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitUntilSelected(chinese))
+        let relaunchedLanguage = languagePicker
+        XCTAssertTrue(relaunchedLanguage.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLanguage("chinese", in: relaunchedLanguage))
     }
 
     func testSavingSettingsPersistsLanguageChange() {
+        app = XCUIApplication()
+        defer { app.terminate() }
         launchSettings(reset: true)
 
         let english = languageOption("settings.language.english")
+        let language = languagePicker
+        XCTAssertTrue(language.waitForExistence(timeout: 5))
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
-        XCTAssertTrue(waitUntilSelected(english))
+        XCTAssertTrue(waitForLanguage("english", in: language))
 
         let save = app.buttons["settings.save"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
@@ -49,12 +51,14 @@ final class InteractionUITests: XCTestCase {
         app.terminate()
         launchSettings(reset: false)
 
-        let persistedEnglish = languageOption("settings.language.english")
-        XCTAssertTrue(persistedEnglish.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitUntilSelected(persistedEnglish))
+        let relaunchedLanguage = languagePicker
+        XCTAssertTrue(relaunchedLanguage.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLanguage("english", in: relaunchedLanguage))
     }
 
     func testSearchAddAndClearUseVisibleButtons() {
+        app = XCUIApplication()
+        defer { app.terminate() }
         app.launchArguments = persistenceIndependentArguments
             + ["--ui-testing-search", "--ui-testing-reset"]
         app.launch()
@@ -87,12 +91,16 @@ final class InteractionUITests: XCTestCase {
     }
 
     private func languageOption(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any)[identifier]
+        app.radioButtons[identifier]
     }
 
-    private func waitUntilSelected(_ element: XCUIElement) -> Bool {
+    private var languagePicker: XCUIElement {
+        app.descendants(matching: .any)["settings.language"]
+    }
+
+    private func waitForLanguage(_ language: String, in element: XCUIElement) -> Bool {
         let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "selected == true"),
+            predicate: NSPredicate(format: "value == %@", language),
             object: element
         )
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed

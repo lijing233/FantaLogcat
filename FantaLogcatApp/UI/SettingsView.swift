@@ -23,11 +23,11 @@ struct SettingsView: View {
                     )
                     .tag(language)
                     .accessibilityIdentifier("settings.language.\(language.rawValue)")
-                    .accessibilityAddTraits(draft.language == language ? .isSelected : [])
                 }
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("settings.language")
+            .accessibilityValue(draft.language.rawValue)
             .help(copy("Preview the settings sheet in this language"))
 
             Text(copy("Chinese is the default. This preference stays on this Mac."))
