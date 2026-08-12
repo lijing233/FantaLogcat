@@ -5,6 +5,9 @@ struct LogView: View {
     @EnvironmentObject private var model: AppModel
     private let levels = LogPriority.allCases.filter { $0 != .unknown }
     @State private var isShowingExportSheet = false
+    @State private var draftKeyword = ""
+    @State private var selectedKeywords: [SelectedKeyword] = []
+    @State private var nextKeywordOperator: KeywordOperator = .or
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +33,7 @@ struct LogView: View {
             LogExportSheet(isPresented: $isShowingExportSheet)
                 .environmentObject(model)
         }
+        .onAppear(perform: restoreSearchBuilderIfNeeded)
     }
 
     private var header: some View {
@@ -141,30 +145,68 @@ struct LogView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField(model.copy("搜索日志正文或 Tag", "Search message or tag"), text: Binding(
-                    get: { model.logFilter.keyword },
-                    set: { model.setLogKeyword($0) }
-                ))
-                .textFieldStyle(.plain)
-                if !model.logFilter.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if !selectedKeywords.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(selectedKeywords.enumerated()), id: \.element.id) { index, keyword in
+                                if index > 0, let relation = keyword.relation {
+                                    Text(relation.rawValue)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.tint)
+                                }
+                                keywordChip(keyword)
+                            }
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(model.copy("输入关键词后按回车添加", "Type a keyword and press Return"), text: $draftKeyword)
+                        .textFieldStyle(.plain)
+                        .onSubmit { addDraftKeyword() }
                     Button {
-                        model.saveCurrentKeyword()
+                        addDraftKeyword()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(trimmedDraftKeyword.isEmpty)
+                    .accessibilityLabel(model.copy("添加关键词", "Add keyword"))
+                    Button {
+                        model.saveKeyword(trimmedDraftKeyword)
                     } label: {
                         Image(systemName: "star")
                     }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel(model.copy("保存关键词", "Save keyword"))
-                    Button {
-                        model.setLogKeyword("")
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                    .disabled(trimmedDraftKeyword.isEmpty)
+                    .accessibilityLabel(model.copy("保存为常用关键词", "Save as favorite keyword"))
+                    Button(KeywordOperator.or.rawValue) {
+                        nextKeywordOperator = .or
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(model.copy("清除搜索", "Clear search"))
+                    .buttonStyle(.bordered)
+                    .tint(nextKeywordOperator == .or ? .accentColor : nil)
+                    .disabled(selectedKeywords.isEmpty)
+                    Button(KeywordOperator.and.rawValue) {
+                        nextKeywordOperator = .and
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(nextKeywordOperator == .and ? .accentColor : nil)
+                    .disabled(selectedKeywords.isEmpty)
+                    if !selectedKeywords.isEmpty || !trimmedDraftKeyword.isEmpty {
+                        Button {
+                            selectedKeywords = []
+                            draftKeyword = ""
+                            model.setLogKeyword("")
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(model.copy("清除搜索条件", "Clear search conditions"))
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -172,8 +214,8 @@ struct LogView: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             Text(model.copy(
-                "多个关键词：用“或”或 | 表示任一命中；用“且”或 + 表示同时包含。",
-                "Multiple keywords: use OR or | for either term; use AND or + to require every term."
+                "点击常用关键词或输入后按回车添加；OR / AND 决定下一个关键词与前一项的关系。",
+                "Click a favorite or press Return to add a term. OR / AND sets the relationship to the next term."
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -181,7 +223,11 @@ struct LogView: View {
             if !model.savedKeywords.isEmpty {
                 HStack(spacing: 7) {
                     ForEach(model.savedKeywords) { keyword in
-                        Button(keyword.value) { model.setLogKeyword(keyword.value) }
+                        Button {
+                            addKeyword(keyword.value)
+                        } label: {
+                            Label(keyword.value, systemImage: "plus")
+                        }
                             .buttonStyle(.bordered)
                             .contextMenu {
                                 Button(model.copy("移除", "Remove")) { model.removeSavedKeyword(keyword) }
@@ -202,6 +248,68 @@ struct LogView: View {
         }
         .buttonStyle(.bordered)
         .tint(model.logFilter.levels == levels ? .accentColor : nil)
+    }
+
+    private func keywordChip(_ keyword: SelectedKeyword) -> some View {
+        HStack(spacing: 5) {
+            Text(keyword.value)
+                .lineLimit(1)
+            Button {
+                selectedKeywords.removeAll { $0.id == keyword.id }
+                normalizeKeywordOperators()
+                applyKeywordConditions()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(model.copy("移除关键词 \(keyword.value)", "Remove keyword \(keyword.value)"))
+        }
+        .font(.callout)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.tint.opacity(0.14), in: Capsule())
+    }
+
+    private var trimmedDraftKeyword: String {
+        draftKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func addDraftKeyword() {
+        addKeyword(trimmedDraftKeyword)
+        draftKeyword = ""
+    }
+
+    private func addKeyword(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        selectedKeywords.append(SelectedKeyword(
+            value: trimmed,
+            relation: selectedKeywords.isEmpty ? nil : nextKeywordOperator
+        ))
+        applyKeywordConditions()
+    }
+
+    private func applyKeywordConditions() {
+        let query = selectedKeywords.enumerated().map { index, keyword in
+            guard index > 0, let relation = keyword.relation else { return keyword.value }
+            return "\(relation.rawValue) \(keyword.value)"
+        }
+        .joined(separator: " ")
+        model.setLogKeyword(query)
+    }
+
+    private func normalizeKeywordOperators() {
+        guard !selectedKeywords.isEmpty else { return }
+        selectedKeywords[0].relation = nil
+        for index in selectedKeywords.indices.dropFirst() where selectedKeywords[index].relation == nil {
+            selectedKeywords[index].relation = nextKeywordOperator
+        }
+    }
+
+    private func restoreSearchBuilderIfNeeded() {
+        guard selectedKeywords.isEmpty,
+              !model.logFilter.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        selectedKeywords = [SelectedKeyword(value: model.logFilter.keyword, relation: nil)]
     }
 
     @ViewBuilder
@@ -298,6 +406,17 @@ struct LogView: View {
         default: .accentColor
         }
     }
+}
+
+private enum KeywordOperator: String, CaseIterable {
+    case or = "OR"
+    case and = "AND"
+}
+
+private struct SelectedKeyword: Identifiable {
+    let id = UUID()
+    let value: String
+    var relation: KeywordOperator?
 }
 
 private struct LogExportSheet: View {

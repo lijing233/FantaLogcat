@@ -302,7 +302,11 @@ final class AppModel: ObservableObject {
     }
 
     func saveCurrentKeyword() {
-        keywordStore.save(logFilter.keyword)
+        saveKeyword(logFilter.keyword)
+    }
+
+    func saveKeyword(_ keyword: String) {
+        keywordStore.save(keyword)
         savedKeywords = keywordStore.keywords
     }
 
