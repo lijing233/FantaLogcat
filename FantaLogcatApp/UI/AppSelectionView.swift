@@ -3,38 +3,245 @@ import SwiftUI
 struct AppSelectionView: View {
     @EnvironmentObject private var model: AppModel
     @State private var search = ""
+    @State private var isBrowsingAllApps = false
 
-    private var visibleApps: [AppDescriptor] {
-        guard !search.isEmpty else { return model.availableApps }
-        return model.availableApps.filter {
-            $0.presentation.displayName.localizedCaseInsensitiveContains(search)
-                || $0.packageName.value.localizedCaseInsensitiveContains(search)
-        }
+    private var searchResults: [AppDescriptor] {
+        AppSelectionPresentation.searchResults(model.availableApps, query: search)
+    }
+
+    private var otherApps: [AppDescriptor] {
+        AppSelectionPresentation.otherApps(
+            model.availableApps,
+            recent: model.recentApps,
+            favorites: model.favoriteApps
+        )
+    }
+
+    private var hasSearch: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose an app").font(.title2.weight(.semibold))
-            Text("Select the game or app whose logs you want to view.").foregroundStyle(.secondary)
-            TextField("Search installed apps", text: $search).textFieldStyle(.roundedBorder)
-            if model.availableApps.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "app.dashed").font(.title)
-                    Text("No third-party apps found").font(.headline)
-                    Text("Install or open an app on the selected device, then try again.")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                header
+                searchField
+
+                if model.availableApps.isEmpty {
+                    emptyInstalledApps
+                } else if hasSearch {
+                    searchSection
+                } else {
+                    defaultSections
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
+            .frame(maxWidth: 920, alignment: .leading)
+        }
+        .task { await model.loadApps() }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Choose an app")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("Start with an app you use often, or search by its application ID.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                Task { await model.loadApps() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search app name or application ID", text: $search)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16))
+            if !search.isEmpty {
+                Button {
+                    search = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Button("Refresh apps") { Task { await model.loadApps() } }
-            } else {
-                List(visibleApps) { app in
-                    Button { model.selectApp(app) } label: {
-                        Label(app.presentation.displayName, systemImage: app.presentation.symbolName ?? "app.dashed")
-                    }.buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var defaultSections: some View {
+        if !model.recentApps.isEmpty {
+            AppSection(title: "Recent") {
+                ForEach(model.recentApps) { app in
+                    AppRow(app: app)
                 }
             }
         }
-        .padding(32)
-        .task { await model.loadApps() }
+
+        if !model.favoriteApps.isEmpty {
+            AppSection(title: "Favorites") {
+                ForEach(model.favoriteApps) { app in
+                    AppRow(app: app)
+                }
+            }
+        }
+
+        if model.recentApps.isEmpty && model.favoriteApps.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Choose your first app")
+                    .font(.headline)
+                Text("Search for a game or application ID, or browse the installed apps below.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 10)
+        }
+
+        DisclosureGroup(isExpanded: $isBrowsingAllApps) {
+            if otherApps.isEmpty {
+                Text("Every installed app is already shown above.")
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(otherApps) { app in
+                        AppRow(app: app)
+                    }
+                }
+                .padding(.top, 10)
+            }
+        } label: {
+            Label("Browse all installed apps", systemImage: "square.grid.2x2")
+                .font(.headline)
+        }
+        .padding(.top, 6)
+    }
+
+    @ViewBuilder
+    private var searchSection: some View {
+        if searchResults.isEmpty {
+            VStack(spacing: 9) {
+                Image(systemName: "magnifyingglass")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Text("No installed app matches \(search)")
+                    .font(.headline)
+                Text("Try part of the app name or its full application ID.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 48)
+        } else {
+            AppSection(title: "Search results") {
+                ForEach(searchResults) { app in
+                    AppRow(app: app)
+                }
+            }
+        }
+    }
+
+    private var emptyInstalledApps: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "app.dashed")
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
+            Text("No third-party apps found")
+                .font(.headline)
+            Text("Install or open an app on the selected device, then refresh this list.")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 72)
+    }
+}
+
+private struct AppSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.uppercased())
+                .font(.caption.weight(.bold))
+                .tracking(0.9)
+                .foregroundStyle(.secondary)
+            LazyVStack(spacing: 8) {
+                content
+            }
+        }
+    }
+}
+
+private struct AppRow: View {
+    @EnvironmentObject private var model: AppModel
+    let app: AppDescriptor
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: app.presentation.symbolName ?? "app.fill")
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 30)
+
+            Button {
+                model.selectApp(app)
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text(app.presentation.displayName)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if app.presentation.provenance == .preset {
+                            Text("TEAM")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.tint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.tint.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    Text(app.packageName.value)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                model.toggleFavorite(app)
+            } label: {
+                Image(systemName: model.isFavorite(app) ? "star.fill" : "star")
+                    .font(.title3)
+                    .foregroundStyle(model.isFavorite(app) ? .yellow : .secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(model.isFavorite(app) ? "Remove favorite" : "Add favorite")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(.primary.opacity(0.07))
+        }
     }
 }
