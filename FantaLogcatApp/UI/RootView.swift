@@ -22,7 +22,7 @@ struct RootView: View {
             await model.refreshDevices()
         }
         .sheet(isPresented: $model.isShowingSettings) {
-            SettingsView()
+            SettingsView(initialDraft: model.settingsDraft)
                 .environmentObject(model)
         }
     }

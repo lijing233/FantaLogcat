@@ -2,65 +2,79 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: AppSettings
+
+    init(initialDraft: AppSettings) {
+        _draft = State(initialValue: initialDraft)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(model.copy("设置", "Settings"))
+            Text(copy("Settings"))
                 .font(.title2.weight(.bold))
 
-            Picker(model.copy("界面语言", "Interface language"), selection: Binding(
-                get: { model.language },
-                set: { model.setLanguage($0) }
-            )) {
+            Picker(copy("Interface language"), selection: $draft.language) {
                 ForEach(AppLanguage.allCases) { language in
                     Text(language.displayName).tag(language)
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("settings.language")
+            .help(copy("Preview the settings sheet in this language"))
 
-            Text(model.copy(
-                "默认使用简体中文；该设置仅保存在本机。",
-                "Chinese is the default. This preference stays on this Mac."
-            ))
-            .font(.callout)
-            .foregroundStyle(.secondary)
+            Text(copy("Chinese is the default. This preference stays on this Mac."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
             Divider()
 
-            Text(model.copy("日志与导出", "Logs and export"))
+            Text(copy("Logs and export"))
                 .font(.headline)
 
             Stepper(
-                model.copy("进入应用时读取最近 \(model.captureSettings.historyLines) 条日志", "Read \(model.captureSettings.historyLines) recent logs when opening an app"),
+                copy("Read \(draft.capture.historyLines) recent logs when opening an app"),
                 value: binding(\.historyLines),
                 in: 0...LogCaptureSettings.maximumHistoryLines,
                 step: 100
             )
 
             Stepper(
-                model.copy("单次会话最多保留 \(model.captureSettings.maxEvents.formatted()) 条日志", "Keep up to \(model.captureSettings.maxEvents.formatted()) logs per new session"),
+                copy("Keep up to \(draft.capture.maxEvents.formatted()) logs per new session"),
                 value: binding(\.maxEvents),
                 in: 1_000...LogCaptureSettings.maximumEvents,
                 step: 1_000
             )
 
             Stepper(
-                model.copy("单次会话日志文本上限 \(model.captureSettings.maxTextBytes / 1_024 / 1_024) MB", "Text cache limit \(model.captureSettings.maxTextBytes / 1_024 / 1_024) MB per new session"),
+                copy("Text cache limit \(draft.capture.maxTextBytes / 1_024 / 1_024) MB per new session"),
                 value: binding(\.maxTextBytes),
                 in: 8 * 1_024 * 1_024...LogCaptureSettings.maximumTextBytes,
                 step: 8 * 1_024 * 1_024
             )
 
-            Toggle(model.copy("导出时默认脱敏", "Redact exports by default"), isOn: binding(\.redactExportsByDefault))
+            Toggle(
+                copy("Redact exports by default"),
+                isOn: binding(\.redactExportsByDefault)
+            )
 
-            Text(model.copy("设置会应用到下一次选择应用；为了稳定性，上限固定为 500 条历史、100,000 条日志和 64 MB 文本缓存。", "Settings apply when you next select an app. Safety ceilings are 500 history lines, 100,000 logs, and 64 MB text cache."))
+            Text(copy("Settings apply when you next select an app. Safety ceilings are 500 history lines, 100,000 logs, and 64 MB text cache."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack {
                 Spacer()
-                Button(model.copy("完成", "Done")) { model.isShowingSettings = false }
+                Button(copy("Close"), action: close)
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("settings.close")
+                    .help(copy("Discard unsaved settings"))
+
+                Button(copy("Save"), action: save)
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("settings.save")
+                    .help(copy("Save and apply all settings"))
             }
         }
         .padding(24)
@@ -69,12 +83,23 @@ struct SettingsView: View {
 
     private func binding<Value>(_ keyPath: WritableKeyPath<LogCaptureSettings, Value>) -> Binding<Value> {
         Binding(
-            get: { model.captureSettings[keyPath: keyPath] },
-            set: { value in
-                var settings = model.captureSettings
-                settings[keyPath: keyPath] = value
-                model.setCaptureSettings(settings)
-            }
+            get: { draft.capture[keyPath: keyPath] },
+            set: { draft.capture[keyPath: keyPath] = $0 }
         )
+    }
+
+    private func copy(_ resource: LocalizedStringResource) -> String {
+        var localizedResource = resource
+        localizedResource.locale = Locale(identifier: draft.language.localeIdentifier)
+        return String(localized: localizedResource)
+    }
+
+    private func close() {
+        dismiss()
+    }
+
+    private func save() {
+        model.saveSettings(draft)
+        dismiss()
     }
 }
