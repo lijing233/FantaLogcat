@@ -305,6 +305,10 @@ final class AppModel: ObservableObject {
         logFilter.keyword = keyword
     }
 
+    func clearLogFilters() {
+        logFilter = LogFilter()
+    }
+
     func pauseLogPresentation() {
         isLogPresentationPaused = true
     }

@@ -408,17 +408,6 @@ struct LogView: View {
     }
 }
 
-private enum KeywordOperator: String, CaseIterable {
-    case or = "OR"
-    case and = "AND"
-}
-
-private struct SelectedKeyword: Identifiable {
-    let id = UUID()
-    let value: String
-    var relation: KeywordOperator?
-}
-
 private struct LogExportSheet: View {
     @EnvironmentObject private var model: AppModel
     @Binding var isPresented: Bool

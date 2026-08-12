@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testClearLogFiltersRestoresAllLevelsAndEmptyKeyword() {
+        let store = InMemoryAppSettingsStore(settings: .init(language: .chinese, capture: .init()))
+        let model = AppModel(environment: .test(), settingsStore: store)
+        model.setLogLevels([.error])
+        model.setLogKeyword("Unity")
+
+        model.clearLogFilters()
+
+        XCTAssertEqual(model.logFilter, LogFilter())
+    }
+
     func testSaveSettingsAppliesAllFieldsAndPersistsOnce() {
         let store = InMemoryAppSettingsStore(settings: .init(language: .chinese, capture: .init()))
         let model = AppModel(environment: .test(), settingsStore: store)
