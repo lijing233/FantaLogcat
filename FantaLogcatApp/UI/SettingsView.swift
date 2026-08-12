@@ -65,7 +65,9 @@ struct SettingsView: View {
                 copy("Redact exports by default"),
                 isOn: binding(\.redactExportsByDefault)
             )
-            .accessibilityIdentifier("settings.capture.redactExports")
+            .accessibilityIdentifier(
+                "settings.capture.redactExports.\(draft.capture.redactExportsByDefault)"
+            )
 
             Text(copy("Settings apply when you next select an app. Safety ceilings are 500 history lines, 100,000 logs, and 64 MB text cache."))
                 .font(.caption)

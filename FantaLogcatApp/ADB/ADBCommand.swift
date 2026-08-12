@@ -110,7 +110,7 @@ enum ADBCommand: Sendable, Equatable {
                 "-s", serial.value, "shell",
                 "dumpsys package \(package.value) | grep -m 1 '^[[:space:]]*application-label:'"
             ]
-        case .resolvePIDs(let serial, let package):
+        case .resolvePIDs(let serial, _):
             ["-s", serial.value, "shell", "ps", "-A", "-o", "PID,NAME"]
         case .startApplication(let serial, let package):
             ["-s", serial.value, "shell", "monkey", "-p", package.value,

@@ -19,11 +19,10 @@ final class InteractionUITests: XCTestCase {
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
         XCTAssertTrue(waitForLanguage("english", in: language))
-        let redact = redactExportsToggle
+        let redact = redactExportsToggle(true)
         XCTAssertTrue(redact.waitForExistence(timeout: 5))
-        XCTAssertEqual(redact.value as? String, "1")
         redact.click()
-        XCTAssertEqual(redact.value as? String, "0")
+        XCTAssertTrue(redactExportsToggle(false).waitForExistence(timeout: 5))
 
         let close = app.buttons["settings.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
@@ -34,7 +33,7 @@ final class InteractionUITests: XCTestCase {
         reopenSettings()
 
         XCTAssertTrue(waitForLanguage("chinese", in: languagePicker))
-        XCTAssertEqual(redactExportsToggle.value as? String, "1")
+        XCTAssertTrue(redactExportsToggle(true).waitForExistence(timeout: 5))
     }
 
     func testSavingSettingsPersistsLanguageChange() {
@@ -48,10 +47,10 @@ final class InteractionUITests: XCTestCase {
         XCTAssertTrue(english.waitForExistence(timeout: 5))
         english.click()
         XCTAssertTrue(waitForLanguage("english", in: language))
-        let redact = redactExportsToggle
+        let redact = redactExportsToggle(true)
         XCTAssertTrue(redact.waitForExistence(timeout: 5))
         redact.click()
-        XCTAssertEqual(redact.value as? String, "0")
+        XCTAssertTrue(redactExportsToggle(false).waitForExistence(timeout: 5))
 
         let save = app.buttons["settings.save"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
@@ -62,7 +61,7 @@ final class InteractionUITests: XCTestCase {
         reopenSettings()
 
         XCTAssertTrue(waitForLanguage("english", in: languagePicker))
-        XCTAssertEqual(redactExportsToggle.value as? String, "0")
+        XCTAssertTrue(redactExportsToggle(false).waitForExistence(timeout: 5))
     }
 
     func testSearchAddAndClearUseVisibleButtons() {
@@ -107,8 +106,8 @@ final class InteractionUITests: XCTestCase {
         app.descendants(matching: .any)["settings.language"]
     }
 
-    private var redactExportsToggle: XCUIElement {
-        app.checkBoxes["settings.capture.redactExports"]
+    private func redactExportsToggle(_ value: Bool) -> XCUIElement {
+        app.checkBoxes["settings.capture.redactExports.\(value)"]
     }
 
     private func liveLanguage(_ value: String) -> XCUIElement {
