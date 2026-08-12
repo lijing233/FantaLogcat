@@ -56,6 +56,7 @@ final class AppModelTests: XCTestCase {
             makeADBInstaller: { throw ADBInstallerError.fileOperationFailed },
             makeDeviceService: { _ in AppModelDeviceService(state: .noDevice) },
             makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         ))
 
@@ -100,6 +101,52 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .selectingApp)
         XCTAssertEqual(model.selectedDevice, device)
     }
+
+    func testSelectingAppStartsLogStreamAndPublishesEvents() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let event = LogEvent(
+            id: 1,
+            deviceTimestamp: nil,
+            receivedAt: Date(),
+            pid: 42,
+            tid: 42,
+            priority: .info,
+            androidTag: "Unity",
+            businessTag: nil,
+            message: "ready",
+            rawText: "ready",
+            parseStatus: .complete,
+            packageName: nil,
+            processName: nil
+        )
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(device)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app], processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]) },
+            makeLogSession: { _ in AppModelLogSession(events: [event]) },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.selectApp(app)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(model.phase, .viewingLogs)
+        XCTAssertEqual(model.logEvents, [event])
+    }
 }
 
 private actor AppModelInstaller: ADBInstalling {
@@ -140,6 +187,29 @@ private actor AppModelDeviceService: DeviceServiceProtocol {
 }
 
 private actor AppModelAppCatalog: AppCatalogProtocol {
-    func listApps(on device: DeviceDescriptor) async throws -> [AppDescriptor] { [] }
-    func resolveProcesses(packageName: AndroidPackageName, on device: DeviceDescriptor) async throws -> [ProcessDescriptor] { [] }
+    let apps: [AppDescriptor]
+    let processes: [ProcessDescriptor]
+
+    init(apps: [AppDescriptor] = [], processes: [ProcessDescriptor] = []) {
+        self.apps = apps
+        self.processes = processes
+    }
+
+    func listApps(on device: DeviceDescriptor) async throws -> [AppDescriptor] { apps }
+    func resolveProcesses(packageName: AndroidPackageName, on device: DeviceDescriptor) async throws -> [ProcessDescriptor] { processes }
+}
+
+private struct AppModelLogSession: LogSessionProtocol {
+    let emittedEvents: [LogEvent]
+
+    init(events: [LogEvent]) {
+        emittedEvents = events
+    }
+
+    func events(on device: DeviceDescriptor, pids: [Int32]) throws -> AsyncThrowingStream<LogEvent, Error> {
+        AsyncThrowingStream { continuation in
+            emittedEvents.forEach { continuation.yield($0) }
+            continuation.finish()
+        }
+    }
 }

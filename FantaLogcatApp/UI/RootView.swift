@@ -13,7 +13,7 @@ struct RootView: View {
             case .selectingApp:
                 AppSelectionView()
             case .viewingLogs:
-                Text("Viewing logs")
+                LogView()
             }
         }
         .frame(minWidth: 920, minHeight: 600)

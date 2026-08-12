@@ -27,11 +27,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedDevice: DeviceDescriptor?
     @Published private(set) var availableApps: [AppDescriptor] = []
     @Published private(set) var selectedApp: AppDescriptor?
+    @Published private(set) var logEvents: [LogEvent] = []
+    @Published private(set) var isLogStreaming = false
+    @Published private(set) var logStreamError: String?
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
     private var deviceService: (any DeviceServiceProtocol)?
     private var appCatalog: (any AppCatalogProtocol)?
+    private var logSession: (any LogSessionProtocol)?
+    private var logTask: Task<Void, Never>?
     private var retryOperation: RetryOperation = .check
 
     init(environment: AppEnvironment) {
@@ -120,8 +125,44 @@ final class AppModel: ObservableObject {
     }
 
     func selectApp(_ app: AppDescriptor) {
+        guard let selectedDevice, let appCatalog, let logSession else { return }
+        logTask?.cancel()
         selectedApp = app
+        logEvents = []
+        logStreamError = nil
+        isLogStreaming = true
         phase = .viewingLogs
+        logTask = Task { [weak self] in
+            let pids = (try? await appCatalog.resolveProcesses(
+                packageName: app.packageName,
+                on: selectedDevice
+            ))?.map(\.pid) ?? []
+            do {
+                let stream = try logSession.events(on: selectedDevice, pids: pids)
+                for try await event in stream {
+                    guard !Task.isCancelled else { return }
+                    self?.appendLogEvent(event)
+                }
+                self?.isLogStreaming = false
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
+                self?.isLogStreaming = false
+            }
+        }
+    }
+
+    func returnToAppSelection() {
+        logTask?.cancel()
+        logTask = nil
+        isLogStreaming = false
+        logStreamError = nil
+        phase = .selectingApp
+    }
+
+    func clearLogs() {
+        logEvents = []
     }
 
     private func resolveInstaller() throws -> any ADBInstalling {
@@ -137,6 +178,16 @@ final class AppModel: ObservableObject {
         }
         if appCatalog == nil {
             appCatalog = environment.makeAppCatalog(installation)
+        }
+        if logSession == nil {
+            logSession = environment.makeLogSession(installation)
+        }
+    }
+
+    private func appendLogEvent(_ event: LogEvent) {
+        logEvents.append(event)
+        if logEvents.count > 100_000 {
+            logEvents.removeFirst(1_000)
         }
     }
 

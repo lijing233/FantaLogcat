@@ -4,6 +4,7 @@ struct AppEnvironment: Sendable {
     let makeADBInstaller: @Sendable () throws -> any ADBInstalling
     let makeDeviceService: @Sendable (ADBInstallation) -> any DeviceServiceProtocol
     let makeAppCatalog: @Sendable (ADBInstallation) -> any AppCatalogProtocol
+    let makeLogSession: @Sendable (ADBInstallation) -> any LogSessionProtocol
     let adbLicenseURL: URL
 
     static let production = AppEnvironment(
@@ -40,21 +41,27 @@ struct AppEnvironment: Sendable {
         makeAppCatalog: { installation in
             AppCatalog(adb: ADBRuntime(executableURL: installation.executableURL, runner: FoundationProcessRunner()))
         },
+        makeLogSession: { installation in
+            LogSession(adb: ADBRuntime(executableURL: installation.executableURL, runner: FoundationProcessRunner()))
+        },
         adbLicenseURL: URL(string: "https://developer.android.com/studio/terms")!
     )
 
     static func test(
         installer: (any ADBInstalling)? = nil,
         deviceService: (any DeviceServiceProtocol)? = nil,
-        appCatalog: (any AppCatalogProtocol)? = nil
+        appCatalog: (any AppCatalogProtocol)? = nil,
+        logSession: (any LogSessionProtocol)? = nil
     ) -> AppEnvironment {
         let resolved = installer ?? TestADBInstaller()
         let resolvedDeviceService = deviceService ?? TestDeviceService()
         let resolvedAppCatalog = appCatalog ?? TestAppCatalog()
+        let resolvedLogSession = logSession ?? TestLogSession()
         return AppEnvironment(
             makeADBInstaller: { resolved },
             makeDeviceService: { _ in resolvedDeviceService },
             makeAppCatalog: { _ in resolvedAppCatalog },
+            makeLogSession: { _ in resolvedLogSession },
             adbLicenseURL: URL(string: "https://example.com/terms")!
         )
     }
@@ -77,6 +84,14 @@ private actor TestAppCatalog: AppCatalogProtocol {
 
 private actor TestDeviceService: DeviceServiceProtocol {
     func refresh() async throws -> DeviceConnectionState { .noDevice }
+}
+
+private struct TestLogSession: LogSessionProtocol {
+    func events(on device: DeviceDescriptor, pids: [Int32]) throws -> AsyncThrowingStream<LogEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
 }
 
 private actor TestADBInstaller: ADBInstalling {
