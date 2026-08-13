@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="FantaLogcat：专为 macOS 打造的原生 Android Logcat 查看器。">
+  <meta name="description" content="FantaLogcat：为 macOS 打造的原生 Android Logcat 工作台，实时、低延迟地定位关键日志。">
   <meta name="theme-color" content="#0b1020">
-  <meta property="og:title" content="FantaLogcat — macOS 原生 Android 日志工具">
-  <meta property="og:description" content="连接设备、选择应用，即刻查看、筛选、搜索并安全导出 Logcat。">
+  <meta property="og:title" content="FantaLogcat — 实时、低延迟的 Android 日志工作台">
+  <meta property="og:description" content="连接设备、选择应用，即刻查看、筛选、搜索并安全导出 Logcat。无需预装 ADB。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://lijing233.github.io/FantaLogcat/">
   <meta property="og:image" content="https://lijing233.github.io/FantaLogcat/images/log-view.jpg">
-  <title>FantaLogcat — macOS 原生 Android 日志工具</title>
+  <title>FantaLogcat — 实时、低延迟的 Android 日志工作台</title>
   <link rel="icon" href="images/app-icon.png" type="image/png">
   <link rel="stylesheet" href="site.css">
 </head>
@@ -22,6 +22,7 @@
     </a>
     <nav aria-label="主导航">
       <a href="#features">功能</a>
+      <a href="#workflow">流程</a>
       <a href="#install">安装</a>
       <a href="https://github.com/lijing233/FantaLogcat" target="_blank" rel="noreferrer">GitHub</a>
     </nav>
@@ -30,13 +31,13 @@
   <main id="top">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow"><span></span>为 Android 开发者打造</div>
-        <h1>在 Mac 上，<br><em>优雅地读懂 Logcat。</em></h1>
-        <p class="hero-lead">连接设备、选择应用，即刻查看实时日志。无需预装 ADB，组合搜索、优先级筛选与安全导出都在一个原生 macOS 应用里。</p>
+        <div class="eyebrow"><span></span>v1.0.3 · 实时低延迟</div>
+        <h1>关键日志，<br><em>不该迟到。</em></h1>
+        <p class="hero-lead">FantaLogcat 是为 macOS 打造的 Android 日志工作台。连接设备、选中应用，实时查看完整日志；组合搜索、优先级筛选与安全导出都在一个原生应用里完成。</p>
         <div class="hero-actions">
           <a class="button primary" href="https://github.com/lijing233/FantaLogcat/releases/latest/download/FantaLogcat-macos-arm64.dmg">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
-            下载 macOS 版
+            免费下载 DMG
           </a>
           <a class="button secondary" href="https://github.com/lijing233/FantaLogcat" target="_blank" rel="noreferrer">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.7.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1.1 1.6 1.1.9 1.6 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.8-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1.1a9.4 9.4 0 015 0c1.9-1.4 2.8-1.1 2.8-1.1.5 1.4.2 2.4.1 2.7.6.8 1 1.7 1 2.8 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v3c0 .3.2.6.7.5a10.2 10.2 0 006.8-9.7C22 6.6 17.5 2 12 2z"/></svg>
@@ -44,6 +45,7 @@
           </a>
         </div>
         <div class="compatibility">
+          <span>✓ 无需预装 ADB</span>
           <span>✓ 免费开源</span>
           <span>✓ Apple 芯片</span>
           <span>✓ macOS 13+</span>
@@ -51,6 +53,7 @@
       </div>
 
       <div class="hero-visual" aria-label="FantaLogcat 实时日志界面预览">
+        <div class="live-badge"><span></span>正在接收实时日志</div>
         <div class="glow"></div>
         <div class="window-frame">
           <div class="window-bar"><i></i><i></i><i></i><span>FantaLogcat</span></div>
@@ -60,17 +63,17 @@
     </section>
 
     <section class="trust-strip" aria-label="产品特点">
-      <div><strong>原生</strong><span>SwiftUI macOS 体验</span></div>
-      <div><strong>专注</strong><span>单进程实时日志</span></div>
-      <div><strong>安全</strong><span>内存采集与导出脱敏</span></div>
-      <div><strong>开源</strong><span>Apache License 2.0</span></div>
+      <div><strong>原生体验</strong><span>专为 macOS 设计</span></div>
+      <div><strong>低延迟流式读取</strong><span>可读即展示，不等进程退出</span></div>
+      <div><strong>完整本地筛选</strong><span>不遗漏跨缓冲区日志</span></div>
+      <div><strong>默认安全</strong><span>导出时保护敏感内容</span></div>
     </section>
 
     <section class="section" id="features">
       <div class="section-heading">
-        <span>更少干扰，更快定位</span>
-        <h2>日志调试需要的，刚刚好。</h2>
-        <p>从应用选择到组合搜索，每一步都围绕日常 Android 调试流程设计。</p>
+        <span>更少等待，更快定位</span>
+        <h2>把注意力留给真正重要的日志。</h2>
+        <p>从应用选择到组合搜索，每一步都围绕真实的 Android 调试流程设计。</p>
       </div>
 
       <div class="feature-grid">
@@ -91,8 +94,8 @@
 
         <article class="feature-card">
           <div class="feature-icon">●</div>
-          <h3>实时、可控的采集</h3>
-          <p>按优先级筛选日志，随时暂停、清屏或导出，专注当前进程。</p>
+          <h3>实时、完整地筛选</h3>
+          <p>流式接收输出并在本地增量匹配；既减少等待，也不会因设备端缓冲造成漏匹配。</p>
         </article>
 
         <article class="feature-card">
@@ -103,15 +106,27 @@
       </div>
     </section>
 
+    <section class="workflow-section" id="workflow" aria-label="使用流程">
+      <div class="section-heading">
+        <span>一个清晰的工作流</span>
+        <h2>从连接到定位，只要三步。</h2>
+      </div>
+      <div class="workflow-steps">
+        <article><b>01</b><h3>连接设备</h3><p>通过 USB 调试连接 Android 设备；首次使用时按引导安装官方 Platform-Tools。</p></article>
+        <article><b>02</b><h3>选择应用</h3><p>从最近、收藏或已安装应用中选择目标包，也可直接搜索应用 ID。</p></article>
+        <article><b>03</b><h3>锁定线索</h3><p>叠加优先级和关键词条件，在不断进入的新日志里持续定位关键信息。</p></article>
+      </div>
+    </section>
+
     <section class="install-section" id="install">
       <div class="install-copy">
         <span class="section-label">三步开始</span>
         <h2>下载，拖入，开始调试。</h2>
-        <p>FantaLogcat 会按需下载并校验 Google 官方 Platform-Tools，不需要提前配置 ADB 环境。</p>
+        <p>FantaLogcat 会按需下载并校验 Google 官方 Platform-Tools。你不需要提前安装或配置 ADB 环境。</p>
         <ol>
           <li><b>1</b><div><strong>下载 DMG</strong><span>适用于 Apple 芯片 Mac，macOS 13 或更高版本。</span></div></li>
           <li><b>2</b><div><strong>拖入 Applications</strong><span>打开镜像，将 FantaLogcat 拖到 Applications 文件夹。</span></div></li>
-          <li><b>3</b><div><strong>连接 Android 设备</strong><span>允许 USB 调试授权，选择应用并查看日志。</span></div></li>
+          <li><b>3</b><div><strong>连接 Android 设备</strong><span>允许 USB 调试授权，选择应用并开始实时筛选。</span></div></li>
         </ol>
         <a class="button primary" href="https://github.com/lijing233/FantaLogcat/releases/latest/download/FantaLogcat-macos-arm64.dmg">下载最新版 DMG</a>
       </div>
@@ -128,7 +143,7 @@
       <div>
         <span class="section-label">开放、透明、可审查</span>
         <h2>为开发者构建，也由开发者共同完善。</h2>
-        <p>FantaLogcat 基于 Apache License 2.0 开源。欢迎查看实现、提交问题或参与贡献。</p>
+        <p>FantaLogcat 基于 Apache License 2.0 开源。欢迎查看实现、提交问题，或参与下一次改进。</p>
       </div>
       <a class="button secondary light" href="https://github.com/lijing233/FantaLogcat" target="_blank" rel="noreferrer">前往 GitHub →</a>
     </section>
@@ -136,7 +151,7 @@
 
   <footer>
     <a class="brand footer-brand" href="#top"><img src="images/app-icon.png" alt="" width="32" height="32"><span>FantaLogcat</span></a>
-    <p>原生 macOS Android Logcat 查看器。</p>
+    <p>原生 macOS Android Logcat 工作台。</p>
     <div><a href="https://github.com/lijing233/FantaLogcat">GitHub</a><a href="https://github.com/lijing233/FantaLogcat/issues">问题反馈</a><a href="https://github.com/lijing233/FantaLogcat/blob/main/LICENSE">许可证</a></div>
   </footer>
 </body>
