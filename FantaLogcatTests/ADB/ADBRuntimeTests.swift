@@ -66,10 +66,10 @@ final class ADBRuntimeTests: XCTestCase {
             ["-s", "ABC123", "logcat", "-d", "-t", "500", "-v", "threadtime", "--pid=42"]
         )
         XCTAssertEqual(
-            ADBCommand.filteredLogcatThreadtime(serial, pids: [42], terms: ["revenueToMMP", "Bob's SDK"]).arguments,
+            ADBCommand.filteredLogcatThreadtime(serial, pids: [43, 42], terms: ["revenueToMMP", "Bob's SDK"]).arguments,
             [
                 "-s", "ABC123", "shell",
-                "logcat -v threadtime --pid=42 | grep --line-buffered -F -i -e 'revenueToMMP' -e 'Bob'\"'\"'s SDK'"
+                "logcat -v threadtime | grep --line-buffered -E '^[0-9][0-9]-[0-9][0-9][[:space:]][0-9:.]+[[:space:]]+(42|43)[[:space:]]' | grep --line-buffered -F -i -e 'revenueToMMP' -e 'Bob'\"'\"'s SDK'"
             ]
         )
     }

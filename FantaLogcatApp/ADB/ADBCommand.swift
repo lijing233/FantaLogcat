@@ -132,10 +132,23 @@ enum ADBCommand: Sendable, Equatable {
         pids: [Int32],
         terms: [String]
     ) -> [String] {
-        let logcat = (["logcat", "-v", "threadtime"] + pids.map { "--pid=\($0)" })
-            .joined(separator: " ")
+        // Android's `logcat --pid` accepts one PID. Repeating the option for a
+        // multi-process package can leave only one process selected, which drops
+        // logs from the package's main process. Filter the threadtime rows in
+        // the shell instead, before applying the keyword grep.
+        let logcat = "logcat -v threadtime"
+        let pidFilter: String
+        if pids.isEmpty {
+            pidFilter = ""
+        } else {
+            let pidPattern = pids
+                .map(String.init)
+                .sorted()
+                .joined(separator: "|")
+            pidFilter = " | grep --line-buffered -E '^[0-9][0-9]-[0-9][0-9][[:space:]][0-9:.]+[[:space:]]+(\(pidPattern))[[:space:]]'"
+        }
         let grep = terms.map { "-e \(shellQuoted($0))" }.joined(separator: " ")
-        return ["-s", serial.value, "shell", "\(logcat) | grep --line-buffered -F -i \(grep)"]
+        return ["-s", serial.value, "shell", "\(logcat)\(pidFilter) | grep --line-buffered -F -i \(grep)"]
     }
 
     private static func shellQuoted(_ value: String) -> String {
