@@ -18,6 +18,13 @@ protocol LogSessionProtocol: Sendable {
         startingID: UInt64
     ) throws -> AsyncThrowingStream<LogEvent, Error>
 
+    func events(
+        on device: DeviceDescriptor,
+        pids: [Int32],
+        startingID: UInt64,
+        deviceFilterTerms: [String]
+    ) throws -> AsyncThrowingStream<LogEvent, Error>
+
 }
 
 extension LogSessionProtocol {
@@ -35,6 +42,15 @@ extension LogSessionProtocol {
         startingID: UInt64
     ) throws -> AsyncThrowingStream<LogEvent, Error> {
         try events(on: device, pids: pids)
+    }
+
+    func events(
+        on device: DeviceDescriptor,
+        pids: [Int32],
+        startingID: UInt64,
+        deviceFilterTerms: [String]
+    ) throws -> AsyncThrowingStream<LogEvent, Error> {
+        try events(on: device, pids: pids, startingID: startingID)
     }
 
 }
@@ -75,7 +91,20 @@ struct LogSession: LogSessionProtocol, Sendable {
         pids: [Int32],
         startingID: UInt64
     ) throws -> AsyncThrowingStream<LogEvent, Error> {
-        let output = try adb.stream(.logcatThreadtime(device.serial, pids: pids))
+        try events(on: device, pids: pids, startingID: startingID, deviceFilterTerms: [])
+    }
+
+    func events(
+        on device: DeviceDescriptor,
+        pids: [Int32],
+        startingID: UInt64,
+        deviceFilterTerms: [String]
+    ) throws -> AsyncThrowingStream<LogEvent, Error> {
+        let output = try adb.stream(
+            deviceFilterTerms.isEmpty
+                ? .logcatThreadtime(device.serial, pids: pids)
+                : .filteredLogcatThreadtime(device.serial, pids: pids, terms: deviceFilterTerms)
+        )
         let pair = AsyncThrowingStream<LogEvent, Error>.makeStream(
             bufferingPolicy: .bufferingOldest(8_192)
         )

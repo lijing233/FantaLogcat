@@ -64,6 +64,31 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(event?.message, "sent")
     }
 
+    func testKeywordEventsUseDeviceSideLineBufferedGrep() async throws {
+        let runtime = StreamingADBRuntime(outputs: [
+            .stdout(Data("08-12 10:00:01.123  1234  1234 D Android.revenueToMMP: sent\n".utf8))
+        ])
+        let session = LogSession(adb: runtime)
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("SERIAL"),
+            displayName: "Pixel",
+            transport: .usb
+        )
+
+        let events = try await session.events(
+            on: device,
+            pids: [1234],
+            startingID: 1,
+            deviceFilterTerms: ["revenueToMMP", "Withdraw"]
+        ).collect()
+
+        XCTAssertEqual(events.map(\.message), ["sent"])
+        XCTAssertEqual(
+            runtime.lastCommand,
+            .filteredLogcatThreadtime(device.serial, pids: [1234], terms: ["revenueToMMP", "Withdraw"])
+        )
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(1),
         condition: @escaping () -> Bool

@@ -69,6 +69,13 @@ struct LogFilter: Sendable, Equatable {
 
     var hasKeyword: Bool { !keywordGroups.isEmpty }
 
+    /// Terms used for the device-side coarse filter. Final OR/AND semantics
+    /// remain local, so a complex query never loses a valid result.
+    var deviceGrepTerms: [String] {
+        var seen = Set<String>()
+        return keywordGroups.flatMap { $0 }.filter { seen.insert($0.lowercased()).inserted }
+    }
+
     /// OR groups containing AND terms, shared by local and device-side filtering.
     var keywordGroups: [[String]] {
         keywordGroups(for: keyword.trimmingCharacters(in: .whitespacesAndNewlines))

@@ -370,9 +370,18 @@ struct LogSearchEditor: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            Text(copy("采集全部日志并保留历史；新日志采用增量筛选，不会反复扫描全部缓存。", "All logs are retained; new logs are filtered incrementally without rescanning the cache."))
+            if model.isUsingDeviceKeywordFilter {
+                Label(
+                    copy("实时匹配流：设备端 grep 按行输出，结果会优先显示；复杂条件仍由本地完成最终判断。", "Live match stream: device-side grep emits each line immediately; complex queries are finalized locally."),
+                    systemImage: "bolt.fill"
+                )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tint)
+            } else {
+                Text(copy("完整日志流：采集目标应用全部日志并保留历史；新日志采用增量筛选，不会反复扫描全部缓存。", "Full log stream: all target-app logs are retained; new logs are filtered incrementally without rescanning the cache."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if !model.savedKeywords.isEmpty {
                 LazyVGrid(columns: savedKeywordColumns, alignment: .leading, spacing: 7) {

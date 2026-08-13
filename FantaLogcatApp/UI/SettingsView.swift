@@ -73,6 +73,17 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(copy("About FantaLogcat"))
+                    .font(.headline)
+                Text(copy("Version \(AppVersion.displayString)"))
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.appVersion")
+            }
+
             if let saveErrorMessage {
                 Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)

@@ -90,6 +90,7 @@ enum ADBCommand: Sendable, Equatable {
     case startApplication(ADBDeviceSerial, AndroidPackageName)
     case logcatSnapshotThreadtime(ADBDeviceSerial, pids: [Int32], lineCount: Int)
     case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
+    case filteredLogcatThreadtime(ADBDeviceSerial, pids: [Int32], terms: [String])
 
     var arguments: [String] {
         return switch self {
@@ -121,7 +122,24 @@ enum ADBCommand: Sendable, Equatable {
         case .logcatThreadtime(let serial, let pids):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
                 + pids.map { "--pid=\($0)" }
+        case .filteredLogcatThreadtime(let serial, let pids, let terms):
+            Self.filteredLogcatArguments(serial: serial, pids: pids, terms: terms)
         }
+    }
+
+    private static func filteredLogcatArguments(
+        serial: ADBDeviceSerial,
+        pids: [Int32],
+        terms: [String]
+    ) -> [String] {
+        let logcat = (["logcat", "-v", "threadtime"] + pids.map { "--pid=\($0)" })
+            .joined(separator: " ")
+        let grep = terms.map { "-e \(shellQuoted($0))" }.joined(separator: " ")
+        return ["-s", serial.value, "shell", "\(logcat) | grep --line-buffered -F -i \(grep)"]
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
     }
 
     var sensitiveValues: [String] {

@@ -53,4 +53,10 @@ final class LogFilteringTests: XCTestCase {
             .fixture(id: 3, message: "Withdraw opened")
         ]).map(\.id), [1])
     }
+
+    func testDeviceGrepTermsCoarselyCoverEveryComplexQueryTermWithoutDuplicates() {
+        let filter = LogFilter(keyword: "Withdraw AND GameEntry OR withdraw")
+
+        XCTAssertEqual(filter.deviceGrepTerms, ["Withdraw", "GameEntry"])
+    }
 }
