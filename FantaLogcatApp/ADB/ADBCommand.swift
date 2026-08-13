@@ -90,6 +90,7 @@ enum ADBCommand: Sendable, Equatable {
     case startApplication(ADBDeviceSerial, AndroidPackageName)
     case logcatSnapshotThreadtime(ADBDeviceSerial, pids: [Int32], lineCount: Int)
     case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
+    case logcatThreadtimeGrep(ADBDeviceSerial, pids: [Int32], keyword: String)
     case logcatThreadtimeFiltered(ADBDeviceSerial, pids: [Int32], awkProgram: String)
 
     var arguments: [String] {
@@ -122,6 +123,11 @@ enum ADBCommand: Sendable, Equatable {
         case .logcatThreadtime(let serial, let pids):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
                 + pids.map { "--pid=\($0)" }
+        case .logcatThreadtimeGrep(let serial, let pids, let keyword):
+            [
+                "-s", serial.value, "shell",
+                "\((["logcat", "-v", "threadtime"] + pids.map { "--pid=\($0)" }).joined(separator: " ")) | grep -i -F \(Self.shellQuote(keyword))"
+            ]
         case .logcatThreadtimeFiltered(let serial, let pids, let awkProgram):
             [
                 "-s", serial.value, "shell",
