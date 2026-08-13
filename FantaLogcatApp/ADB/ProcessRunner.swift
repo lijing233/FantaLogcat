@@ -24,7 +24,6 @@ enum ProcessRunnerError: Error, Equatable {
 }
 
 final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
-    private static let streamChunkBytes = 64 * 1_024
     private static let streamBufferChunks = 256
 
     func run(executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessResult {
@@ -99,7 +98,7 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
         let coordinator = Task.detached(priority: .utility) { [processBox] in
             let handles = [stdoutPipe.fileHandleForReading, stderrPipe.fileHandleForReading]
             let stdoutTask = Task.detached(priority: .utility) {
-                try Self.drain(
+                try await Self.drain(
                     stdoutPipe.fileHandleForReading,
                     output: ProcessOutput.stdout,
                     continuation: pair.continuation,
@@ -108,7 +107,7 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
                 )
             }
             let stderrTask = Task.detached(priority: .utility) {
-                try Self.drain(
+                try await Self.drain(
                     stderrPipe.fileHandleForReading,
                     output: ProcessOutput.stderr,
                     continuation: pair.continuation,
@@ -149,27 +148,65 @@ final class FoundationProcessRunner: ProcessRunning, @unchecked Sendable {
 
     private static func drain(
         _ handle: FileHandle,
-        output: (Data) -> ProcessOutput,
+        output: @escaping @Sendable (Data) -> ProcessOutput,
         continuation: AsyncThrowingStream<ProcessOutput, Error>.Continuation,
         processBox: ProcessBox,
         handles: [FileHandle]
-    ) throws {
-        while true {
-            let data = try handle.read(upToCount: streamChunkBytes) ?? Data()
-            guard !data.isEmpty else { return }
-            switch continuation.yield(output(data)) {
-            case .enqueued:
-                continue
-            case .dropped:
-                processBox.stopSoon(closing: handles)
-                throw ProcessRunnerError.outputBufferOverflow
-            case .terminated:
-                return
-            @unknown default:
-                processBox.stopSoon(closing: handles)
-                throw ProcessRunnerError.outputBufferOverflow
+    ) async throws {
+        let completion = StreamDrainCompletion()
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            completion.install(done)
+            handle.readabilityHandler = { readableHandle in
+                let data = readableHandle.availableData
+                guard !data.isEmpty else {
+                    readableHandle.readabilityHandler = nil
+                    completion.finish(.success(()))
+                    return
+                }
+
+                switch continuation.yield(output(data)) {
+                case .enqueued:
+                    break
+                case .dropped:
+                    readableHandle.readabilityHandler = nil
+                    processBox.stopSoon(closing: handles)
+                    completion.finish(.failure(ProcessRunnerError.outputBufferOverflow))
+                case .terminated:
+                    readableHandle.readabilityHandler = nil
+                    completion.finish(.success(()))
+                @unknown default:
+                    readableHandle.readabilityHandler = nil
+                    processBox.stopSoon(closing: handles)
+                    completion.finish(.failure(ProcessRunnerError.outputBufferOverflow))
+                }
             }
         }
+    }
+}
+
+private final class StreamDrainCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var result: Result<Void, Error>?
+
+    func install(_ continuation: CheckedContinuation<Void, Error>) {
+        let immediate = lock.withLock { () -> Result<Void, Error>? in
+            if let result { return result }
+            self.continuation = continuation
+            return nil
+        }
+        if let immediate { continuation.resume(with: immediate) }
+    }
+
+    func finish(_ result: Result<Void, Error>) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            guard self.result == nil else { return nil }
+            self.result = result
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.resume(with: result)
     }
 }
 

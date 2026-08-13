@@ -41,47 +41,6 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial, pids: [1234], lineCount: 500))
     }
 
-    func testFastSingleKeywordFilterRunsDeviceSideAwkWithImmediateFlush() throws {
-        let runtime = StreamingADBRuntime(outputs: [])
-        let session = LogSession(adb: runtime)
-        let device = DeviceDescriptor(serial: try ADBDeviceSerial("SERIAL"), displayName: "Pixel", transport: .usb)
-
-        _ = try session.events(
-            on: device,
-            pids: [42],
-            filter: LogFilter(keyword: "revenueToMMP", captureMode: .fast),
-            startingID: 1
-        )
-
-        guard case .logcatThreadtimeFiltered(let serial, let pids, let program)? = runtime.lastCommand else {
-            return XCTFail("Expected device-side awk command")
-        }
-        XCTAssertEqual(serial, device.serial)
-        XCTAssertEqual(pids, [42])
-        XCTAssertTrue(program.contains("revenuetommp"))
-        XCTAssertTrue(program.contains("fflush()"))
-    }
-
-    func testFastComplexKeywordFilterRunsDeviceSideAwkWithImmediateFlush() throws {
-        let runtime = StreamingADBRuntime(outputs: [])
-        let session = LogSession(adb: runtime)
-        let device = DeviceDescriptor(serial: try ADBDeviceSerial("SERIAL"), displayName: "Pixel", transport: .usb)
-
-        _ = try session.events(
-            on: device,
-            pids: [42],
-            filter: LogFilter(keyword: "revenueToMMP OR Firebase", captureMode: .fast),
-            startingID: 1
-        )
-
-        guard case .logcatThreadtimeFiltered(_, _, let program)? = runtime.lastCommand else {
-            return XCTFail("Expected device-side awk command")
-        }
-        XCTAssertTrue(program.contains("revenuetommp"))
-        XCTAssertTrue(program.contains("firebase"))
-        XCTAssertTrue(program.contains("keep"))
-        XCTAssertTrue(program.contains("fflush()"))
-    }
 
     func testEventsFlushesAnIdleFinalLineWithoutWaitingForTheNextADBChunk() async throws {
         let runtime = IdleStreamingADBRuntime()

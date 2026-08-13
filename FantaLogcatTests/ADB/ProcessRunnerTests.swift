@@ -77,6 +77,25 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
     }
 
+    func testStreamDeliversAShortRunningProcessOutputWithoutWaitingForItsExit() async throws {
+        let runner = FoundationProcessRunner()
+        let clock = ContinuousClock()
+        let started = clock.now
+        let stream = try runner.stream(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf ready; sleep 2"]
+        )
+        var iterator = stream.makeAsyncIterator()
+
+        let first = try await iterator.next()
+
+        guard case .stdout(let output)? = first else {
+            return XCTFail("Expected immediate stdout output")
+        }
+        XCTAssertEqual(String(decoding: output, as: UTF8.self), "ready")
+        XCTAssertLessThan(started.duration(to: clock.now), .seconds(1))
+    }
+
     func testTimeoutReturnsEvenWhenProcessIgnoresTerminate() async {
         let runner = FoundationProcessRunner()
         let clock = ContinuousClock()

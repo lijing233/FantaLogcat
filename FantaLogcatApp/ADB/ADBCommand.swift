@@ -90,7 +90,6 @@ enum ADBCommand: Sendable, Equatable {
     case startApplication(ADBDeviceSerial, AndroidPackageName)
     case logcatSnapshotThreadtime(ADBDeviceSerial, pids: [Int32], lineCount: Int)
     case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
-    case logcatThreadtimeFiltered(ADBDeviceSerial, pids: [Int32], awkProgram: String)
 
     var arguments: [String] {
         return switch self {
@@ -122,11 +121,6 @@ enum ADBCommand: Sendable, Equatable {
         case .logcatThreadtime(let serial, let pids):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
                 + pids.map { "--pid=\($0)" }
-        case .logcatThreadtimeFiltered(let serial, let pids, let awkProgram):
-            [
-                "-s", serial.value, "shell",
-                "\((["logcat", "-v", "threadtime"] + pids.map { "--pid=\($0)" }).joined(separator: " ")) | awk \(Self.shellQuote(awkProgram))"
-            ]
         }
     }
 
@@ -135,7 +129,4 @@ enum ADBCommand: Sendable, Equatable {
         return [code.value]
     }
 
-    private static func shellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\\"'\\\"'"))'"
-    }
 }

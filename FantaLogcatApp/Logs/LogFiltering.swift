@@ -1,10 +1,5 @@
 import Foundation
 
-enum LogCaptureMode: String, Sendable, Equatable, CaseIterable {
-    case fast
-    case standard
-}
-
 struct LogSearchHighlightSegment: Sendable, Equatable {
     let text: String
     let isMatch: Bool
@@ -53,12 +48,10 @@ enum LogSearchHighlighting {
 struct LogFilter: Sendable, Equatable {
     var levels: Set<LogPriority>
     var keyword: String
-    var captureMode: LogCaptureMode
 
-    init(levels: Set<LogPriority> = [], keyword: String = "", captureMode: LogCaptureMode = .fast) {
+    init(levels: Set<LogPriority> = [], keyword: String = "") {
         self.levels = levels
         self.keyword = keyword
-        self.captureMode = captureMode
     }
 
     var highlightTerms: [String] {

@@ -249,12 +249,7 @@ final class AppModel: ObservableObject {
                 do {
                     self?.isLogStreaming = true
                     self?.logCaptureState = .followingLiveLogs
-                    let stream = try logSession.events(
-                        on: selectedDevice,
-                        pids: pids,
-                        filter: self?.logFilter ?? LogFilter(),
-                        startingID: 1
-                    )
+                    let stream = try logSession.events(on: selectedDevice, pids: pids, startingID: 1)
                     for try await event in stream {
                         guard !Task.isCancelled else { return }
                         await self?.appendLogEvent(event)
@@ -296,27 +291,16 @@ final class AppModel: ObservableObject {
     func setLogLevels(_ levels: Set<LogPriority>) {
         logFilter.levels = levels
         rebuildFilteredLogEvents()
-        restartFastCaptureIfNeeded()
     }
 
     func setLogKeyword(_ keyword: String) {
         logFilter.keyword = keyword
         rebuildFilteredLogEvents()
-        restartFastCaptureIfNeeded()
-    }
-
-    func setLogCaptureMode(_ mode: LogCaptureMode) {
-        guard logFilter.captureMode != mode else { return }
-        let needsRestart = logFilter.hasKeyword
-        logFilter.captureMode = mode
-        rebuildFilteredLogEvents()
-        if needsRestart { restartCaptureIfViewing() }
     }
 
     func clearLogFilters() {
         logFilter = LogFilter()
         rebuildFilteredLogEvents()
-        restartCaptureIfViewing()
     }
 
     func pauseLogPresentation() {
@@ -488,16 +472,6 @@ final class AppModel: ObservableObject {
         filteredLogEvents = logFilter.apply(logEvents)
     }
 
-    private func restartFastCaptureIfNeeded() {
-        guard logFilter.captureMode == .fast,
-              logFilter.hasKeyword else { return }
-        restartCaptureIfViewing()
-    }
-
-    private func restartCaptureIfViewing() {
-        guard phase == .viewingLogs, let selectedApp else { return }
-        selectApp(selectedApp)
-    }
 
     private func refreshAppSections() {
         let appsByPackage = Dictionary(uniqueKeysWithValues: availableApps.map { ($0.packageName.value, $0) })

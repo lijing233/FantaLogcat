@@ -18,12 +18,6 @@ protocol LogSessionProtocol: Sendable {
         startingID: UInt64
     ) throws -> AsyncThrowingStream<LogEvent, Error>
 
-    func events(
-        on device: DeviceDescriptor,
-        pids: [Int32],
-        filter: LogFilter,
-        startingID: UInt64
-    ) throws -> AsyncThrowingStream<LogEvent, Error>
 }
 
 extension LogSessionProtocol {
@@ -43,14 +37,6 @@ extension LogSessionProtocol {
         try events(on: device, pids: pids)
     }
 
-    func events(
-        on device: DeviceDescriptor,
-        pids: [Int32],
-        filter: LogFilter,
-        startingID: UInt64
-    ) throws -> AsyncThrowingStream<LogEvent, Error> {
-        try events(on: device, pids: pids, startingID: startingID)
-    }
 }
 
 struct LogSession: LogSessionProtocol, Sendable {
@@ -89,26 +75,7 @@ struct LogSession: LogSessionProtocol, Sendable {
         pids: [Int32],
         startingID: UInt64
     ) throws -> AsyncThrowingStream<LogEvent, Error> {
-        try events(on: device, pids: pids, filter: LogFilter(captureMode: .standard), startingID: startingID)
-    }
-
-    func events(
-        on device: DeviceDescriptor,
-        pids: [Int32],
-        filter: LogFilter,
-        startingID: UInt64
-    ) throws -> AsyncThrowingStream<LogEvent, Error> {
-        let command: ADBCommand
-        if filter.captureMode == .fast, filter.hasKeyword {
-            command = .logcatThreadtimeFiltered(
-                device.serial,
-                pids: pids,
-                awkProgram: Self.awkProgram(for: filter.keywordGroups)
-            )
-        } else {
-            command = .logcatThreadtime(device.serial, pids: pids)
-        }
-        let output = try adb.stream(command)
+        let output = try adb.stream(.logcatThreadtime(device.serial, pids: pids))
         let pair = AsyncThrowingStream<LogEvent, Error>.makeStream(
             bufferingPolicy: .bufferingOldest(8_192)
         )
@@ -163,19 +130,4 @@ struct LogSession: LogSessionProtocol, Sendable {
         return pair.stream
     }
 
-    private static func awkProgram(for groups: [[String]]) -> String {
-        let clauses = groups.map { group in
-            "(" + group.map { "index(tolower($0), \"\(awkString($0.lowercased()))\")" }.joined(separator: " && ") + ")"
-        }
-        let matches = clauses.joined(separator: " || ")
-        return "/^[0-9][0-9]-[0-9][0-9] / { keep = (\(matches)); if (keep) { print; fflush() }; next } keep { print; fflush() }"
-    }
-
-    private static func awkString(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "")
-            .replacingOccurrences(of: "\r", with: "")
-    }
 }

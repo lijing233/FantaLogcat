@@ -370,15 +370,7 @@ struct LogSearchEditor: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            Picker(copy("采集方式", "Capture mode"), selection: captureModeBinding) {
-                Text(copy("极速筛选（默认）", "Fast filter (default)")).tag(LogCaptureMode.fast)
-                Text(copy("普通筛选（保留全部）", "Standard filter (keep all)")).tag(LogCaptureMode.standard)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("logSearch.captureMode")
-            Text(model.logFilter.captureMode == .fast
-                 ? copy("仅采集匹配关键词的实时日志，速度接近命令行 grep。修改关键词会重新开始采集。", "Only matching live logs are captured for grep-like speed. Changing keywords restarts capture.")
-                 : copy("采集全部日志并保留历史；新日志采用增量筛选，不会反复扫描全部缓存。", "All logs are retained; new logs are filtered incrementally without rescanning the cache."))
+            Text(copy("采集全部日志并保留历史；新日志采用增量筛选，不会反复扫描全部缓存。", "All logs are retained; new logs are filtered incrementally without rescanning the cache."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -421,13 +413,6 @@ struct LogSearchEditor: View {
         !builder.keywords.isEmpty
             || !builder.draft.isEmpty
             || !model.logFilter.levels.isEmpty
-    }
-
-    private var captureModeBinding: Binding<LogCaptureMode> {
-        Binding(
-            get: { model.logFilter.captureMode },
-            set: { model.setLogCaptureMode($0) }
-        )
     }
 
     private func operatorButton(_ keywordOperator: KeywordOperator, identifier: String) -> some View {
