@@ -100,15 +100,11 @@ struct LogSession: LogSessionProtocol, Sendable {
     ) throws -> AsyncThrowingStream<LogEvent, Error> {
         let command: ADBCommand
         if filter.captureMode == .fast, filter.hasKeyword {
-            if let keyword = Self.singleKeyword(in: filter.keywordGroups) {
-                command = .logcatThreadtimeGrep(device.serial, pids: pids, keyword: keyword)
-            } else {
-                command = .logcatThreadtimeFiltered(
-                    device.serial,
-                    pids: pids,
-                    awkProgram: Self.awkProgram(for: filter.keywordGroups)
-                )
-            }
+            command = .logcatThreadtimeFiltered(
+                device.serial,
+                pids: pids,
+                awkProgram: Self.awkProgram(for: filter.keywordGroups)
+            )
         } else {
             command = .logcatThreadtime(device.serial, pids: pids)
         }
@@ -173,11 +169,6 @@ struct LogSession: LogSessionProtocol, Sendable {
         }
         let matches = clauses.joined(separator: " || ")
         return "/^[0-9][0-9]-[0-9][0-9] / { keep = (\(matches)); if (keep) { print; fflush() }; next } keep { print; fflush() }"
-    }
-
-    private static func singleKeyword(in groups: [[String]]) -> String? {
-        guard groups.count == 1, groups[0].count == 1 else { return nil }
-        return groups[0][0]
     }
 
     private static func awkString(_ value: String) -> String {

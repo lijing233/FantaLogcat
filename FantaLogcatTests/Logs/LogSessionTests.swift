@@ -41,7 +41,7 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial, pids: [1234], lineCount: 500))
     }
 
-    func testFastSingleKeywordFilterRunsDeviceSideGrep() throws {
+    func testFastSingleKeywordFilterRunsDeviceSideAwkWithImmediateFlush() throws {
         let runtime = StreamingADBRuntime(outputs: [])
         let session = LogSession(adb: runtime)
         let device = DeviceDescriptor(serial: try ADBDeviceSerial("SERIAL"), displayName: "Pixel", transport: .usb)
@@ -53,12 +53,13 @@ final class LogSessionTests: XCTestCase {
             startingID: 1
         )
 
-        guard case .logcatThreadtimeGrep(let serial, let pids, let keyword)? = runtime.lastCommand else {
-            return XCTFail("Expected device-side grep command")
+        guard case .logcatThreadtimeFiltered(let serial, let pids, let program)? = runtime.lastCommand else {
+            return XCTFail("Expected device-side awk command")
         }
         XCTAssertEqual(serial, device.serial)
         XCTAssertEqual(pids, [42])
-        XCTAssertEqual(keyword, "revenueToMMP")
+        XCTAssertTrue(program.contains("revenuetommp"))
+        XCTAssertTrue(program.contains("fflush()"))
     }
 
     func testFastComplexKeywordFilterRunsDeviceSideAwkWithImmediateFlush() throws {
