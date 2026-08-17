@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var updateController: UpdateController
     @Environment(\.dismiss) private var dismiss
     @State private var draft: AppSettings
     @State private var saveErrorMessage: String?
@@ -104,6 +105,40 @@ struct SettingsView: View {
             Text(copy("Settings apply when you next select an app. Safety ceilings are 500 history lines, 100,000 logs, and 64 MB text cache."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+
+            Text(copy("Updates"))
+                .font(.headline)
+
+            Toggle(
+                copy("Automatically check for updates"),
+                isOn: Binding(
+                    get: { updateController.automaticallyChecksForUpdates },
+                    set: { updateController.automaticallyChecksForUpdates = $0 }
+                )
+            )
+
+            Toggle(
+                copy("Automatically download updates"),
+                isOn: Binding(
+                    get: { updateController.automaticallyDownloadsUpdates },
+                    set: { updateController.automaticallyDownloadsUpdates = $0 }
+                )
+            )
+            .disabled(!updateController.automaticallyChecksForUpdates)
+
+            HStack {
+                Text(copy("Update preferences take effect immediately."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(copy("Check for Updates…")) {
+                    updateController.checkForUpdates()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!updateController.canCheckForUpdates)
+            }
 
             Divider()
 

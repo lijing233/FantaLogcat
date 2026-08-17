@@ -1,4 +1,4 @@
-.PHONY: prepare-build generate test build check-public test-release-check test-dmg ci release-clean release
+.PHONY: prepare-build generate test build check-public test-release-check test-dmg ci release-clean release appcast
 
 BUILD_DIR := .build
 DERIVED_DATA := $(BUILD_DIR)/DerivedData
@@ -51,3 +51,6 @@ release: release-clean
 	cd $(RELEASE_DIR) && shasum -a 256 $(notdir $(RELEASE_ZIP)) > $(notdir $(RELEASE_ZIP)).sha256.tmp && mv $(notdir $(RELEASE_ZIP)).sha256.tmp $(notdir $(RELEASE_ZIP)).sha256
 	Scripts/create-dmg.sh "$(RELEASE_APP)" "$(RELEASE_DMG)"
 	cd $(RELEASE_DIR) && shasum -a 256 $(notdir $(RELEASE_DMG)) > $(notdir $(RELEASE_DMG)).sha256.tmp && mv $(notdir $(RELEASE_DMG)).sha256.tmp $(notdir $(RELEASE_DMG)).sha256
+
+appcast:
+	Scripts/generate-appcast.sh

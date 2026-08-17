@@ -1,3 +1,5 @@
 FantaLogcat includes an Android Debug Bridge runtime obtained from the official Android Platform-Tools distribution.
 
 Android Debug Bridge and Android Open Source Project materials are provided by the Android Open Source Project under their applicable licenses. See the Platform-Tools distribution's included notices for the complete third-party notices and license terms.
+
+FantaLogcat uses Sparkle 2, Copyright (c) 2006-2013 Andy Matuschak, Copyright (c) 2009-2013 Elgato Systems GmbH, Copyright (c) 2011-2014 Kornel Lesiński, Copyright (c) 2015-2026 Sparkle Project contributors. Sparkle is distributed under the MIT License. See https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE for the complete license text.

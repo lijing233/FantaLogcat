@@ -14,8 +14,12 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     CLANG_WARN_DOCUMENTATION_COMMENTS: YES
-    MARKETING_VERSION: 1.0.8
-    CURRENT_PROJECT_VERSION: 8
+    MARKETING_VERSION: 1.0.9
+    CURRENT_PROJECT_VERSION: 9
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.4
 targets:
   FantaLogcat:
     type: application
@@ -25,12 +29,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.fantalogcat.FantaLogcat
         PRODUCT_NAME: FantaLogcat
-        INFOPLIST_KEY_CFBundleDisplayName: FantaLogcat
-        INFOPLIST_KEY_CFBundleShortVersionString: $(MARKETING_VERSION)
-        INFOPLIST_KEY_CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: FantaLogcatApp/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
+    dependencies:
+      - package: Sparkle
   FantaLogcatTests:
     type: bundle.unit-test
     platform: macOS

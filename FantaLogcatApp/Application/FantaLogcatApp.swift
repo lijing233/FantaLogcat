@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct FantaLogcatApp: App {
-    private enum LaunchSurface {
+    private enum LaunchSurface: Equatable {
         case production
         case settings
         case search
@@ -12,6 +12,7 @@ struct FantaLogcatApp: App {
 
     private let launchSurface: LaunchSurface
     @StateObject private var model: AppModel
+    @StateObject private var updateController: UpdateController
 
     init() {
         let arguments = Set(ProcessInfo.processInfo.arguments)
@@ -25,6 +26,9 @@ struct FantaLogcatApp: App {
         }
 
         launchSurface = surface
+        _updateController = StateObject(
+            wrappedValue: UpdateController(startingUpdater: surface == .production)
+        )
 
         switch surface {
         case .production:
@@ -52,8 +56,17 @@ struct FantaLogcatApp: App {
         WindowGroup {
             launchContent
                 .environmentObject(model)
+                .environmentObject(updateController)
                 .environment(\.locale, Locale(identifier: model.language.localeIdentifier))
                 .preferredColorScheme(model.effectiveAppearance.colorScheme)
+        }
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updateController.checkForUpdates()
+                }
+                .disabled(!updateController.canCheckForUpdates)
+            }
         }
     }
 

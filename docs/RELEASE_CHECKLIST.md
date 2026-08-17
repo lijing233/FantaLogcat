@@ -20,6 +20,8 @@ Complete every item from a clean checkout of the intended release commit.
 - [ ] Verify the packaged app is arm64 and that code-signature structure verifies.
 - [ ] Open the DMG and verify that it contains `FantaLogcat.app` and an `Applications` shortcut.
 - [ ] Produce and verify the release ZIP and DMG SHA-256 checksums.
+- [ ] Run `make appcast`, verify the appcast version and EdDSA signature, and confirm the private key is not tracked.
+- [ ] Test an installed previous Sparkle-enabled version updating to the release candidate.
 - [ ] Sign and notarize the distribution artifact with the release credentials outside this repository.
 
 ## Publication
@@ -27,4 +29,5 @@ Complete every item from a clean checkout of the intended release commit.
 - [ ] Create the GitHub Release manually.
 - [ ] Attach the release DMG and its SHA-256 checksum as the recommended download.
 - [ ] Attach the release ZIP and its SHA-256 checksum as the portable alternative.
+- [ ] Publish `docs/appcast.xml` and verify its enclosure URL resolves to the uploaded ZIP.
 - [ ] Publish concise release notes describing user-visible changes and known limitations.

@@ -39,6 +39,7 @@
 
 - 深色、浅色或跟随系统主题，切换后立即生效。
 - 可设置启动时默认进入 Logcat 应用选择页或工具箱。
+- 内置 Sparkle 自动更新：可自动检查、选择自动下载，或随时手动检查 GitHub 发布的新版本。
 - 无需预装 `adb`：首次使用时按需下载 Google 官方 Platform-Tools，并在安装前校验 SHA-256。
 
 ## 界面预览
@@ -101,12 +102,15 @@ make generate   # 生成 Xcode 工程
 make test       # 运行测试
 make build      # 构建 Release 应用
 make release    # 生成 DMG、ZIP 及 SHA-256 校验文件
+make appcast    # 使用钥匙串中的 EdDSA 私钥生成 Sparkle 更新 Feed
 ```
 
 `make release` 会在 `.build/releases` 生成：
 
 - `FantaLogcat-macos-arm64.dmg` 与对应 `.sha256`
 - `FantaLogcat-macos-arm64.zip` 与对应 `.sha256`
+
+Sparkle 更新 Feed 位于 `docs/appcast.xml`。EdDSA 私钥只保存在发布者的 macOS Keychain 中，不得提交到仓库；发布前应离线备份该密钥。
 
 ## 当前限制
 
