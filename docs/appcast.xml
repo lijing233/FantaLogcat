@@ -3,26 +3,31 @@
     <channel>
         <title>FantaLogcat</title>
         <item>
-            <title>1.0.12</title>
-            <pubDate>Mon, 17 Aug 2026 21:29:42 +0800</pubDate>
+            <title>1.0.13</title>
+            <pubDate>Mon, 17 Aug 2026 22:55:45 +0800</pubDate>
             <link>https://lijing233.github.io/FantaLogcat/</link>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>1.0.12</sparkle:shortVersionString>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.0.13</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# FantaLogcat 1.0.12
+            <description sparkle:format="markdown"><![CDATA[# FantaLogcat 1.0.13
 
-## 自动更新
+## 设置体验
 
-- 开启“自动检查更新”时，每次正常启动应用都会立即在后台静默检查；没有新版本时不打扰用户。
-- 修复设置页面或其他 sheet 打开时，第一次点击“安装并重启应用”无法退出应用的问题。
-- Sparkle 准备安装时会先关闭应用内 sheet，并明确响应退出请求，确保一次完成安装和重启。
+- 设置从浮层弹窗改为应用内独立页面，避免内容过长、靠下显示和遮挡主界面。
+- 新增通用、日志与导出、软件更新、关于四个分类；左侧切换分类，右侧滚动查看内容。
+- 顶部提供返回与保存操作；未保存时返回会丢弃草稿，外观预览也会恢复。
+
+## 更新
+
+- 保留每次启动时的后台更新检查，以及手动检查、自动下载和“安装并重启应用”流程。
+- 设置页打开时安装更新会先回到主界面，再交由 Sparkle 退出、替换并重新启动应用。
 
 ## 验证
 
-- 保留 Sparkle 2.9.4 与 EdDSA 更新包签名，可由 1.0.11 直接更新到本版本。
+- 通过 Release 构建与 123 个单元测试。
 ]]></description>
-            <enclosure url="https://github.com/lijing233/FantaLogcat/releases/download/v1.0.12/FantaLogcat-macos-arm64.zip" length="5038350" type="application/octet-stream" sparkle:edSignature="lgtKJ9F+zAzUPvyidp7+8tDnXXE/qpM++lYYethN05BX3mZPCP8LRGeS4tg+8nirJETrDQwPspSJm/dL2FglBw=="/>
+            <enclosure url="https://github.com/lijing233/FantaLogcat/releases/download/v1.0.13/FantaLogcat-macos-arm64.zip" length="5074847" type="application/octet-stream" sparkle:edSignature="hB0IWKyFW+iJ1HhQ7Mo+0fp7aghn5qHsXOaSaEniP2bO1OKsExXKzFv7oFHsgdtMWNz+XSFbZortuPOPKr/JAQ=="/>
         </item>
     </channel>
 </rss>

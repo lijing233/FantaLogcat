@@ -5,38 +5,41 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch model.phase {
-            case .preparingADB:
-                ADBPreparationView()
-            case .selectingDevice:
-                DeviceSelectionView()
-            case .selectingApp:
-                AppSelectionView()
-            case .toolbox:
-                if let service = model.adbToolService,
-                   let scrcpy = model.scrcpyManager,
-                   let device = model.selectedDevice {
-                    ADBToolboxView(
-                        service: service,
-                        scrcpy: scrcpy,
-                        device: device,
-                        apps: model.availableApps
-                    )
-                } else {
+            if model.isShowingSettings {
+                SettingsView(
+                    initialDraft: model.settingsDraft,
+                    onClose: { model.isShowingSettings = false }
+                )
+            } else {
+                switch model.phase {
+                case .preparingADB:
+                    ADBPreparationView()
+                case .selectingDevice:
+                    DeviceSelectionView()
+                case .selectingApp:
                     AppSelectionView()
+                case .toolbox:
+                    if let service = model.adbToolService,
+                       let scrcpy = model.scrcpyManager,
+                       let device = model.selectedDevice {
+                        ADBToolboxView(
+                            service: service,
+                            scrcpy: scrcpy,
+                            device: device,
+                            apps: model.availableApps
+                        )
+                    } else {
+                        AppSelectionView()
+                    }
+                case .viewingLogs:
+                    LogView()
                 }
-            case .viewingLogs:
-                LogView()
             }
         }
         .frame(minWidth: 920, minHeight: 600)
         .task {
             await model.prepareADB()
             await model.refreshDevices()
-        }
-        .sheet(isPresented: $model.isShowingSettings) {
-            SettingsView(initialDraft: model.settingsDraft)
-                .environmentObject(model)
         }
         .onReceive(NotificationCenter.default.publisher(for: UpdateInstallationCoordinator.willInstallNotification)) { _ in
             model.isShowingSettings = false

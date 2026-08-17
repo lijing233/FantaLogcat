@@ -128,19 +128,23 @@ private struct UITestingSettingsHost: View {
     @State private var isShowingSettings = false
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text(model.language.rawValue)
-                .accessibilityIdentifier("uiTesting.live.language.\(model.language.rawValue)")
-            Text(model.captureSettings.redactExportsByDefault ? "true" : "false")
-                .accessibilityIdentifier("uiTesting.live.redaction.\(model.captureSettings.redactExportsByDefault)")
-            Button("Open Settings") { isShowingSettings = true }
-                .accessibilityIdentifier("uiTesting.settings.reopen")
-        }
-            .onAppear { isShowingSettings = true }
-            .sheet(isPresented: $isShowingSettings) {
-                SettingsView(initialDraft: model.settingsDraft)
-                    .environmentObject(model)
+        ZStack {
+            VStack(spacing: 12) {
+                Text(model.language.rawValue)
+                    .accessibilityIdentifier("uiTesting.live.language.\(model.language.rawValue)")
+                Text(model.captureSettings.redactExportsByDefault ? "true" : "false")
+                    .accessibilityIdentifier("uiTesting.live.redaction.\(model.captureSettings.redactExportsByDefault)")
+                Button("Open Settings") { isShowingSettings = true }
+                    .accessibilityIdentifier("uiTesting.settings.reopen")
             }
+            if isShowingSettings {
+                SettingsView(
+                    initialDraft: model.settingsDraft,
+                    onClose: { isShowingSettings = false }
+                )
+            }
+        }
+        .onAppear { isShowingSettings = true }
     }
 }
 
