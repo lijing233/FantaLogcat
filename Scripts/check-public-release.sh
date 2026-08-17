@@ -54,6 +54,11 @@ if [ -n "${APP_PATH:-}" ]; then
     public_key=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$info_plist" 2>/dev/null) || fail 'SUPublicEDKey is missing from Info.plist'
     [ "$feed_url" = 'https://lijing233.github.io/FantaLogcat/appcast.xml' ] || fail "unexpected Sparkle feed URL: $feed_url"
     [ -n "$public_key" ] && [ "$public_key" != '__SPARKLE_PUBLIC_ED_KEY__' ] || fail 'Sparkle public key is not configured'
+    app_entitlements=$(codesign -d --entitlements :- "$APP_PATH" 2>&1) || fail 'could not read app entitlements'
+    printf '%s' "$app_entitlements" | grep -F '<key>com.apple.security.cs.disable-library-validation</key><true/>' >/dev/null || fail 'ad-hoc Sparkle build requires disabled library validation'
+    if printf '%s' "$app_entitlements" | grep -F '<key>com.apple.security.get-task-allow</key><true/>' >/dev/null; then
+      fail 'release app must not include get-task-allow'
+    fi
   fi
 fi
 

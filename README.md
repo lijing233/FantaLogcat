@@ -70,7 +70,7 @@
 shasum -a 256 -c FantaLogcat-macos-arm64.dmg.sha256
 ```
 
-公开发布版本仍需由维护者使用 Apple Developer ID 签名并完成公证。未公证的本地构建可能被 Gatekeeper 拦截；请右键应用选择“打开”，或仅在“系统设置 → 隐私与安全性”中为该应用选择“仍要打开”，不要全局关闭 Gatekeeper。
+公开发布版本仍需由维护者使用 Apple Developer ID 签名并完成公证。未公证的构建可能被 Gatekeeper 拦截；请先在 Finder 中右键应用选择“打开”。如果系统仍然阻止，可双击 DMG 内的“打开隐私与安全性”快捷入口，然后在对应页面为 FantaLogcat 选择“仍要打开”，不要全局关闭 Gatekeeper。成功安装 1.0.10 后，后续版本可通过应用内 Sparkle 更新，通常不需要再次手动下载安装包。
 
 ## 系统要求
 
@@ -103,6 +103,7 @@ make test       # 运行测试
 make build      # 构建 Release 应用
 make release    # 生成 DMG、ZIP 及 SHA-256 校验文件
 make appcast    # 使用钥匙串中的 EdDSA 私钥生成 Sparkle 更新 Feed
+make test-launch # 启动打包应用并检查 dyld/签名运行时错误
 ```
 
 `make release` 会在 `.build/releases` 生成：

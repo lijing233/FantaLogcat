@@ -1,4 +1,4 @@
-.PHONY: prepare-build generate test build check-public test-release-check test-dmg ci release-clean release appcast
+.PHONY: prepare-build generate test build check-public test-release-check test-dmg test-launch ci release-clean release appcast
 
 BUILD_DIR := .build
 DERIVED_DATA := $(BUILD_DIR)/DerivedData
@@ -29,6 +29,9 @@ test-release-check:
 test-dmg:
 	Scripts/test-dmg.sh
 
+test-launch:
+	Scripts/test-app-launch.sh
+
 ci: test-release-check test-dmg test
 
 release-clean: prepare-build
@@ -47,6 +50,7 @@ release: release-clean
 	lipo -archs "$(RELEASE_APP)/Contents/MacOS/FantaLogcat" | grep -qx arm64
 	test -s "$(RELEASE_APP)/Contents/Resources/AppIcon.icns"
 	codesign --verify --deep --strict "$(RELEASE_APP)"
+	Scripts/test-app-launch.sh "$(RELEASE_APP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(RELEASE_APP)" "$(RELEASE_ZIP)"
 	cd $(RELEASE_DIR) && shasum -a 256 $(notdir $(RELEASE_ZIP)) > $(notdir $(RELEASE_ZIP)).sha256.tmp && mv $(notdir $(RELEASE_ZIP)).sha256.tmp $(notdir $(RELEASE_ZIP)).sha256
 	Scripts/create-dmg.sh "$(RELEASE_APP)" "$(RELEASE_DMG)"

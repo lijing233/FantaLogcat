@@ -48,6 +48,7 @@ mkdir -p "$staging_dir" "$(dirname "$output_dmg")"
 touch "$staging_dir/.metadata_never_index"
 ditto "$app_path" "$staging_dir/FantaLogcat.app"
 ln -s /Applications "$staging_dir/Applications"
+ditto "$script_dir/PrivacySecurity.webloc" "$staging_dir/打开隐私与安全性.webloc"
 swift "$script_dir/create-dmg-background.swift" "$background_path"
 
 rm -f "$output_dmg"
@@ -101,6 +102,7 @@ on run arguments
 
       set position of item "FantaLogcat.app" to {195, 230}
       set position of item "Applications" to {565, 230}
+      set position of item "打开隐私与安全性.webloc" to {380, 370}
 
       update without registering applications
       delay 2

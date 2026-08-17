@@ -18,6 +18,7 @@ Complete every item from a clean checkout of the intended release commit.
 - [ ] Scan public artifacts for private configuration, credentials, logs, and unintended files.
 - [ ] Run `make release`.
 - [ ] Verify the packaged app is arm64 and that code-signature structure verifies.
+- [ ] Run `make test-launch` against the packaged app and confirm it remains alive through startup.
 - [ ] Open the DMG and verify that it contains `FantaLogcat.app` and an `Applications` shortcut.
 - [ ] Produce and verify the release ZIP and DMG SHA-256 checksums.
 - [ ] Run `make appcast`, verify the appcast version and EdDSA signature, and confirm the private key is not tracked.

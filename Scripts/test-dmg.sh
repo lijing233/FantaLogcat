@@ -38,6 +38,8 @@ is_mounted=true
 [ -x "$mount_point/FantaLogcat.app/Contents/MacOS/FantaLogcat" ]
 [ -L "$mount_point/Applications" ]
 [ "$(readlink "$mount_point/Applications")" = /Applications ]
+[ -f "$mount_point/打开隐私与安全性.webloc" ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :URL' "$mount_point/打开隐私与安全性.webloc")" = 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension' ]
 [ -f "$mount_point/.metadata_never_index" ] || {
   printf '%s\n' 'DMG fixture check failed: Spotlight exclusion marker is missing' >&2
   exit 1
