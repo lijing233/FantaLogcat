@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: AppSettings
     @State private var saveErrorMessage: String?
+    @State private var didSave = false
 
     init(initialDraft: AppSettings) {
         _draft = State(initialValue: initialDraft)
@@ -32,6 +33,37 @@ struct SettingsView: View {
             .help(copy("Preview the settings sheet in this language"))
 
             Text(copy("Chinese is the default. This preference stays on this Mac."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Picker(copy("Appearance"), selection: $draft.appearance) {
+                Text(copy("System"))
+                    .tag(AppAppearance.system)
+                    .accessibilityIdentifier("settings.appearance.system")
+                Text(copy("Light"))
+                    .tag(AppAppearance.light)
+                    .accessibilityIdentifier("settings.appearance.light")
+                Text(copy("Dark"))
+                    .tag(AppAppearance.dark)
+                    .accessibilityIdentifier("settings.appearance.dark")
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("settings.appearance")
+            .accessibilityValue(draft.appearance.rawValue)
+
+            Text(copy("Choose a fixed appearance or follow the system setting."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Picker(copy("Default page after connecting a device"), selection: $draft.defaultDeviceDestination) {
+                Text(copy("Choose app and view logs"))
+                    .tag(DefaultDeviceDestination.logs)
+                Text(copy("Toolbox"))
+                    .tag(DefaultDeviceDestination.toolbox)
+            }
+            .pickerStyle(.segmented)
+
+            Text(copy("This preference is used the next time a device is connected or selected."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -75,13 +107,21 @@ struct SettingsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(copy("About FantaLogcat"))
-                    .font(.headline)
-                Text(copy("Version \(AppVersion.displayString)"))
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("settings.appVersion")
+            HStack(spacing: 10) {
+                Image("FantaMascot")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 42, height: 36)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(copy("About FantaLogcat"))
+                        .font(.headline)
+                    Text(copy("Version \(AppVersion.displayString)"))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.appVersion")
+                }
             }
 
             if let saveErrorMessage {
@@ -108,6 +148,14 @@ struct SettingsView: View {
         }
         .padding(24)
         .frame(width: 500)
+        .onChange(of: draft.appearance) { appearance in
+            model.previewAppearance(appearance)
+        }
+        .onDisappear {
+            if !didSave {
+                model.endAppearancePreview()
+            }
+        }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<LogCaptureSettings, Value>) -> Binding<Value> {
@@ -124,12 +172,15 @@ struct SettingsView: View {
     }
 
     private func close() {
+        model.endAppearancePreview()
         dismiss()
     }
 
     private func save() {
         do {
             try model.saveSettings(draft)
+            didSave = true
+            model.endAppearancePreview()
             dismiss()
         } catch {
             saveErrorMessage = draft.language == .chinese

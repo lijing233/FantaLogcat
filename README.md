@@ -1,32 +1,59 @@
-# FantaLogcat
+<p align="center">
+  <img src="docs/images/app-icon.png" width="128" height="128" alt="FantaLogcat 图标">
+</p>
 
-FantaLogcat 是一款原生 macOS Android Logcat 查看器。连接 Android 设备、选择应用进程后，即可在 Mac 上实时查看、筛选、搜索并导出该进程的日志。
+<h1 align="center">FantaLogcat</h1>
 
-[应用主页](https://lijing233.github.io/FantaLogcat/) · [下载最新版](https://github.com/lijing233/FantaLogcat/releases/latest) · [问题反馈](https://github.com/lijing233/FantaLogcat/issues)
+<p align="center">
+  原生 macOS Android 调试工作台：把实时 Logcat 和常用 ADB 操作留在一个窗口里。
+</p>
+
+<p align="center">
+  <a href="https://lijing233.github.io/FantaLogcat/">应用主页</a> ·
+  <a href="https://github.com/lijing233/FantaLogcat/releases/latest">下载最新版</a> ·
+  <a href="https://github.com/lijing233/FantaLogcat/issues">问题反馈</a>
+</p>
+
+## 功能概览
+
+### 可靠的实时 Logcat
+
+- 选择设备与应用后，自动跟踪主进程和子进程，主机端按 PID 过滤并保留完整堆栈续行。
+- 应用停止、崩溃或重启后自动刷新 PID；ADB 瞬时退出时按退避策略恢复采集。
+- 按日志等级筛选，并使用关键词卡片与 `OR` / `AND` 关系构建组合查询。
+- 有界环形缓存控制长时间会话的内存占用，支持暂停、清屏、自动跟随与导出。
+- 导出前可对常见 token、密码和密钥模式脱敏，默认启用脱敏。
+
+### 可视化 ADB 工具箱
+
+- 拖入 APK 即可安装，安装后展示应用信息并支持直接打开。
+- 按需下载并管理 `scrcpy`，启动屏幕镜像后可从应用内关闭。
+- 发送 Deeplink；可保存、命名和复用常用链接，并可在高级选项中指定处理应用。
+- 读取当前 Activity，复制组件名，保存常用 Activity，并直接执行 `am start -n`。
+- 向设备发送普通文本或 JSON；支持清空、复制与 JSON 格式校验。
+- 打开、关闭、重启应用，或在二次确认后清除应用数据。
+- 一键截图并快速打开保存位置；读取屏幕、设备标识与 GAID 等设备信息。
+- 最近使用应用、搜索选择、键盘导航，让重复操作更快完成。
+
+### 原生 macOS 体验
+
+- 深色、浅色或跟随系统主题，切换后立即生效。
+- 可设置启动时默认进入 Logcat 应用选择页或工具箱。
+- 无需预装 `adb`：首次使用时按需下载 Google 官方 Platform-Tools，并在安装前校验 SHA-256。
 
 ## 界面预览
 
 ### 应用选择
 
-从最近使用、收藏或设备上的全部已安装应用中快速定位目标，也可以按应用名和应用 ID 搜索。
+从最近使用、收藏或设备上的全部已安装应用中定位目标，也可以按应用名称和包名搜索。
 
 ![FantaLogcat 应用选择界面](docs/images/app-picker.jpg)
 
 ### 实时日志与组合搜索
 
-在同一个窗口中查看目标进程的实时日志、切换优先级、暂停或清屏，并通过关键词卡片和 `OR` / `AND` 关系构建组合查询。
+在同一个窗口中查看实时日志、切换等级、暂停或清屏，并通过关键词卡片组合查询。
 
 ![FantaLogcat 实时日志与组合搜索界面](docs/images/log-view.jpg)
-
-## 主要功能
-
-- 选择已连接的 Android 设备、应用与进程，专注查看单个进程的 Logcat。
-- 按日志优先级筛选，并使用 `OR` / `AND` 组合多个搜索关键词。
-- 收藏常用关键词，快速复用搜索条件。
-- 限制历史日志条数和文本缓存大小，避免长时间会话无限占用内存。
-- 导出前可对常见 token、密码和密钥模式进行脱敏，默认启用脱敏。
-- 设置采用“关闭放弃、保存生效”的原子交互，保存失败时不会覆盖当前配置。
-- 按需下载 Google 官方 Android Platform-Tools，并在安装前校验 SHA-256。
 
 ## 下载与安装
 
@@ -34,61 +61,59 @@ FantaLogcat 是一款原生 macOS Android Logcat 查看器。连接 Android 设�
 
 1. 双击打开 DMG。
 2. 将 `FantaLogcat.app` 拖到窗口中的 `Applications` 快捷方式。
-3. 安装完成后，可在“应用程序”、Launchpad 或 Spotlight 中搜索 **FantaLogcat** 并启动。
-4. 确认应用正常打开后，可以推出并删除下载的 DMG。
+3. 从“应用程序”、Launchpad 或 Spotlight 启动 FantaLogcat。
 
-也可以下载 ZIP，解压后手动将 `FantaLogcat.app` 移入“应用程序”目录。DMG 和 ZIP 均提供同名 `.sha256` 文件，可在下载目录中校验：
+也可以下载 ZIP，解压后手动将应用移入“应用程序”目录。DMG 和 ZIP 均提供同名 `.sha256` 文件，可在下载目录中校验：
 
 ```sh
 shasum -a 256 -c FantaLogcat-macos-arm64.dmg.sha256
 ```
 
-公开发布版本仍需由维护者使用 Apple Developer ID 签名并完成公证。未公证的本地构建可能被 Gatekeeper 拦截；请右键应用选择“打开”，或在“系统设置 → 隐私与安全性”中仅为该应用选择“仍要打开”，不要全局关闭 Gatekeeper。
+公开发布版本仍需由维护者使用 Apple Developer ID 签名并完成公证。未公证的本地构建可能被 Gatekeeper 拦截；请右键应用选择“打开”，或仅在“系统设置 → 隐私与安全性”中为该应用选择“仍要打开”，不要全局关闭 Gatekeeper。
 
 ## 系统要求
 
 - Apple 芯片 Mac（`arm64`），macOS 13 或更高版本。
 - 已启用“开发者选项”和“USB 调试”或“无线调试”的 Android 设备。
-- 使用 USB 调试时，需要可传输数据的 USB 线，并在设备上确认调试授权。
+- USB 调试需要可传输数据的线缆，并在设备上确认调试授权。
 
-FantaLogcat 不要求用户预先安装 `adb`。首次需要 Android 工具时，阅读 Google 许可条款并选择“接受并安装”；应用会下载官方 Platform-Tools、校验 SHA-256，并将其保存在本机应用支持目录中。
-
-## 使用方法
+## 快速开始
 
 1. 通过 USB 连接设备，或完成无线调试配对。
 2. 如设备弹出授权提示，请允许这台 Mac 进行调试。
-3. 在 FantaLogcat 中选择设备以及需要查看的应用或进程。
-4. 开始采集日志，根据需要设置优先级和组合搜索条件。
-5. 需要分享日志时打开导出面板，检查脱敏结果后再保存文件。
+3. 选择首页入口：进入 Logcat 后选择目标应用，或直接进入工具箱。
+4. 首次使用 Android 工具时，阅读许可条款并安装 Platform-Tools。
 
-## 隐私与日志导出
+Activity 能否由 ADB 打开取决于目标应用：已导出的 Activity 通常可直接打开；未导出的 Activity 仅在应用可调试并允许 `run-as`，或设备具备相应权限时可打开。FantaLogcat 会在失败位置显示设备返回的具体原因。
 
-采集到的日志仅保存在内存中，不会自动写入持久化日志档案；收藏内容和设置保存在本机。导出必须由用户主动执行。
+## 隐私与本地数据
 
-导出脱敏能够识别常见 token、密码和密钥模式，但无法保证覆盖所有秘密信息、个人数据或专有内容。分享前请务必人工检查导出文件。
+日志只保存在当前内存缓存中，不会自动写入持久化日志档案。设置、最近使用记录、关键词收藏、Deeplink 收藏和 Activity 收藏保存在本机。所有导出、截图、安装与设备操作都需要用户主动触发。
+
+自动脱敏无法保证覆盖所有秘密信息、个人数据或专有内容，分享导出文件前请人工复核。
 
 ## 本地开发
 
-项目使用 Xcode 26.6、Swift 6.3.3、Mint 0.18.0 和 XcodeGen 2.46.0。常用命令：
+项目使用 Swift 6、SwiftUI + AppKit 与 XcodeGen。常用命令：
 
 ```sh
 make generate   # 生成 Xcode 工程
-make test       # 运行单元测试和 UI 测试
+make test       # 运行测试
 make build      # 构建 Release 应用
 make release    # 生成 DMG、ZIP 及 SHA-256 校验文件
 ```
 
-`make release` 会在隐藏且不会被 Spotlight 索引的 `.build/releases` 生成：
+`make release` 会在 `.build/releases` 生成：
 
-- `FantaLogcat-macos-arm64.dmg` 与 `FantaLogcat-macos-arm64.dmg.sha256`
-- `FantaLogcat-macos-arm64.zip` 与 `FantaLogcat-macos-arm64.zip.sha256`
+- `FantaLogcat-macos-arm64.dmg` 与对应 `.sha256`
+- `FantaLogcat-macos-arm64.zip` 与对应 `.sha256`
 
 ## 当前限制
 
-- 当前版本一次专注查看一个选定进程，不用于完全替代所有 Android 调试工具。
-- 设备是否可用取决于 ADB 连接状态和设备调试授权。
+- 当前版本一次选择一个应用进行 Logcat 采集，不用于完全替代 Android Studio 或所有 Android 调试工具。
+- 工具箱操作是否成功取决于设备状态、调试授权、Android 权限和目标应用的 Manifest 配置。
 - 无线调试必须在设备上保持开启，并与 Mac 网络互通。
-- 自动脱敏只识别常见模式，导出内容仍需人工复核。
+- `scrcpy` 需要首次下载外部组件；后续由 FantaLogcat 管理启动状态。
 
 ## 参与项目
 

@@ -53,6 +53,7 @@ struct FantaLogcatApp: App {
             launchContent
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.language.localeIdentifier))
+                .preferredColorScheme(model.effectiveAppearance.colorScheme)
         }
     }
 
@@ -76,8 +77,22 @@ struct FantaLogcatApp: App {
             LogCaptureSettings.storageKey,
             AppSettings.storageKey,
             UserDefaultsLogKeywordStore.storageKey,
-            UserDefaultsAppSelectionStore.storageKey
+            UserDefaultsAppSelectionStore.storageKey,
+            UserDefaultsADBShortcutStore.storageKey
         ].forEach(defaults.removeObject(forKey:))
+    }
+}
+
+private extension AppAppearance {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system:
+            nil
+        case .light:
+            .light
+        case .dark:
+            .dark
+        }
     }
 }
 

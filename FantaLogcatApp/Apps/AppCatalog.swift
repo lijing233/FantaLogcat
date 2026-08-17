@@ -49,6 +49,21 @@ actor AppCatalog: AppCatalogProtocol {
     }
 
     func resolveProcesses(packageName: AndroidPackageName, on device: DeviceDescriptor) async throws -> [ProcessDescriptor] {
+        if let viaPS = try? await resolveProcessesViaPS(packageName: packageName, on: device),
+           !viaPS.isEmpty {
+            return viaPS
+        }
+
+        // `ps -A -o PID,NAME` is not uniformly available across Android/OEM
+        // builds. Fall back to `pidof` for the main process rather than
+        // reporting "waiting for app" while the app is actually running.
+        return await resolveProcessesViaPidOf(packageName: packageName, on: device)
+    }
+
+    private func resolveProcessesViaPS(
+        packageName: AndroidPackageName,
+        on device: DeviceDescriptor
+    ) async throws -> [ProcessDescriptor] {
         let result = try await adb.run(.resolvePIDs(device.serial, packageName), timeout: .seconds(5))
         let prefix = packageName.value
         return String(decoding: result.stdout, as: UTF8.self)
@@ -60,6 +75,22 @@ actor AppCatalog: AppCatalogProtocol {
                 guard name == prefix || name.hasPrefix(prefix + ":") else { return nil }
                 return ProcessDescriptor(pid: pid, name: name)
             }
+            .sorted { $0.pid < $1.pid }
+    }
+
+    private func resolveProcessesViaPidOf(
+        packageName: AndroidPackageName,
+        on device: DeviceDescriptor
+    ) async -> [ProcessDescriptor] {
+        // `pidof` matches the exact process name, so `:subprocess` children are
+        // not discovered here; the `ps` path above already covers them.
+        guard let result = try? await adb.run(.pidOf(device.serial, packageName), timeout: .seconds(5)) else {
+            return []
+        }
+        return String(decoding: result.stdout, as: UTF8.self)
+            .split(whereSeparator: \ .isWhitespace)
+            .compactMap { Int32(String($0)) }
+            .map { ProcessDescriptor(pid: $0, name: packageName.value) }
             .sorted { $0.pid < $1.pid }
     }
 }

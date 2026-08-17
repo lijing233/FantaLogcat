@@ -58,19 +58,117 @@ final class ADBRuntimeTests: XCTestCase {
             ]
         )
         XCTAssertEqual(
-            ADBCommand.logcatThreadtime(serial, pids: [42, 43]).arguments,
-            ["-s", "ABC123", "logcat", "-v", "threadtime", "--pid=42", "--pid=43"]
+            ADBCommand.logcatThreadtime(serial).arguments,
+            ["-s", "ABC123", "logcat", "-v", "threadtime"]
         )
         XCTAssertEqual(
-            ADBCommand.logcatSnapshotThreadtime(serial, pids: [42], lineCount: 900).arguments,
-            ["-s", "ABC123", "logcat", "-d", "-t", "500", "-v", "threadtime", "--pid=42"]
+            ADBCommand.logcatSnapshotThreadtime(serial).arguments,
+            ["-s", "ABC123", "logcat", "-d", "-v", "threadtime"]
         )
         XCTAssertEqual(
-            ADBCommand.filteredLogcatThreadtime(serial, pids: [43, 42], terms: ["revenueToMMP", "Bob's SDK"]).arguments,
+            ADBCommand.pidOf(serial, package).arguments,
+            ["-s", "ABC123", "shell", "pidof", "com.example.game"]
+        )
+        XCTAssertEqual(
+            ADBCommand.stopApplication(serial, package).arguments,
+            ["-s", "ABC123", "shell", "am", "force-stop", "com.example.game"]
+        )
+        XCTAssertEqual(
+            ADBCommand.clearApplicationData(serial, package).arguments,
+            ["-s", "ABC123", "shell", "pm", "clear", "com.example.game"]
+        )
+        XCTAssertEqual(
+            ADBCommand.screenshot(serial).arguments,
+            ["-s", "ABC123", "exec-out", "screencap", "-p"]
+        )
+        XCTAssertEqual(
+            ADBCommand.listThirdPartyPackagePaths(serial).arguments,
+            ["-s", "ABC123", "shell", "pm", "list", "packages", "-3", "-f"]
+        )
+        XCTAssertEqual(
+            ADBCommand.applicationDetails(serial, package).arguments,
+            ["-s", "ABC123", "shell", "dumpsys", "package", "com.example.game"]
+        )
+        XCTAssertEqual(
+            ADBCommand.advertisingID(serial).arguments,
+            ["-s", "ABC123", "shell", "settings", "get", "secure", "advertising_id"]
+        )
+    }
+
+    func testBuildsSafeToolArguments() throws {
+        let serial = try ADBDeviceSerial("ABC123")
+        let package = try AndroidPackageName("com.example.game")
+        let apk = URL(fileURLWithPath: "/tmp/My Game.apk")
+        let options = APKInstallOptions(
+            replaceExisting: true,
+            allowTestPackages: true,
+            grantRuntimePermissions: true,
+            allowDowngrade: false
+        )
+
+        XCTAssertEqual(
+            ADBCommand.installAPK(serial, apk, options).arguments,
+            ["-s", "ABC123", "install", "-r", "-t", "-g", "/tmp/My Game.apk"]
+        )
+        XCTAssertEqual(
+            ADBCommand.openDeepLink(
+                serial,
+                try ADBDeepLink("mygame://level?id=7&mode=test"),
+                package
+            ).arguments,
+            [
+                "-s", "ABC123", "shell", "am", "start", "-W", "-a",
+                "android.intent.action.VIEW", "-d",
+                "'mygame://level?id=7&mode=test'", "-p", "com.example.game"
+            ]
+        )
+        let component = try AndroidActivityComponent(
+            "adb shell am start -n com.example.game/com.example.game.DebugActivity"
+        )
+        XCTAssertEqual(component.value, "com.example.game/com.example.game.DebugActivity")
+        XCTAssertEqual(
+            ADBCommand.currentActivity(serial).arguments,
+            ["-s", "ABC123", "shell", "dumpsys", "activity", "activities"]
+        )
+        XCTAssertEqual(
+            ADBCommand.openActivity(serial, component).arguments,
+            [
+                "-s", "ABC123", "shell", "am", "start", "-W", "-n",
+                "com.example.game/com.example.game.DebugActivity"
+            ]
+        )
+        XCTAssertEqual(
+            ADBCommand.openActivityAsPackage(serial, component).arguments,
+            [
+                "-s", "ABC123", "shell", "run-as", "com.example.game",
+                "am", "start", "-W", "-n", "com.example.game/com.example.game.DebugActivity"
+            ]
+        )
+        XCTAssertEqual(
+            ADBCommand.inputText(serial, try ADBInputText("hello world+1")).arguments,
+            ["-s", "ABC123", "shell", "input", "text", "hello%sworld+1"]
+        )
+        let json = try ADBJSONText(#"{"name":"Fanta","count":2}"#)
+        XCTAssertEqual(json.value, #"{"count":2,"name":"Fanta"}"#)
+        XCTAssertEqual(
+            ADBCommand.inputJSON(serial, json).arguments,
             [
                 "-s", "ABC123", "shell",
-                "logcat -v threadtime | grep --line-buffered -E '^[0-9][0-9]-[0-9][0-9][[:space:]][0-9:.]+[[:space:]]+(42|43)[[:space:]]' | grep --line-buffered -F -i -e 'revenueToMMP' -e 'Bob'\"'\"'s SDK'"
+                "payload=eyJjb3VudCI6MiwibmFtZSI6IkZhbnRhIn0=; decoded=$(printf %s \"$payload\" | base64 -d) || exit 1; input text \"$decoded\""
             ]
+        )
+        XCTAssertThrowsError(try ADBDeepLink("no-scheme"))
+        XCTAssertThrowsError(try AndroidActivityComponent("com.example.game"))
+        XCTAssertEqual(
+            try AndroidActivityComponent("com.example.game/.DebugActivity").value,
+            "com.example.game/.DebugActivity"
+        )
+        XCTAssertThrowsError(try ADBInputText("中文"))
+        XCTAssertThrowsError(try ADBInputText("unsafe;command"))
+        XCTAssertThrowsError(try ADBJSONText("not json"))
+        XCTAssertEqual(
+            try ADBJSONText(#"{"name":"中文😺"}"#).value,
+            #"{"name":"\u4E2D\u6587\uD83D\uDE3A"}"#
         )
     }
 

@@ -41,13 +41,20 @@ struct AppSelectionView: View {
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 28)
-            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: 1_180, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .task { await model.loadApps() }
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
+            Image("FantaMascot")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 64, height: 56)
+                .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.copy("选择应用", "Choose an app"))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -56,6 +63,12 @@ struct AppSelectionView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                model.openToolbox()
+            } label: {
+                Label(model.copy("工具箱", "Toolbox"), systemImage: "wrench.and.screwdriver")
+            }
+            .buttonStyle(.bordered)
             Button {
                 Task { await model.loadApps() }
             } label: {
@@ -129,7 +142,7 @@ struct AppSelectionView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
             } else {
-                LazyVStack(spacing: 8) {
+                LazyVGrid(columns: AppSectionLayout.columns, alignment: .leading, spacing: 8) {
                     ForEach(otherApps) { app in
                         AppRow(app: app)
                     }
@@ -204,11 +217,17 @@ private struct AppSection<Content: View>: View {
                 .font(.caption.weight(.bold))
                 .tracking(0.9)
                 .foregroundStyle(.secondary)
-            LazyVStack(spacing: 8) {
+            LazyVGrid(columns: AppSectionLayout.columns, alignment: .leading, spacing: 8) {
                 content
             }
         }
     }
+}
+
+private enum AppSectionLayout {
+    static let columns = [
+        GridItem(.adaptive(minimum: 360, maximum: 560), spacing: 10, alignment: .top)
+    ]
 }
 
 private struct AppRow: View {

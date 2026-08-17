@@ -55,7 +55,8 @@ final class LogcatParserTests: XCTestCase {
             Data((line + "\n").utf8),
             receivedAt: FixtureFactory.referenceDate
         )
-        let flushed = await parser.flushPending()
+        let generation = await parser.currentGeneration()
+        let flushed = await parser.flushPending(since: generation)
 
         XCTAssertTrue(immediatelyEmitted.isEmpty)
         XCTAssertEqual(flushed.count, 1)
@@ -63,6 +64,29 @@ final class LogcatParserTests: XCTestCase {
         XCTAssertEqual(flushed.first?.message, "revenue sent")
         let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
         XCTAssertTrue(tail.isEmpty)
+    }
+
+    func testStaleIdleFlushDoesNotPublishAReplacedPendingEvent() async throws {
+        let parser = LogcatParser(calendar: FixtureFactory.utcCalendar)
+        let first = "08-11 12:00:00.123  42  43 I Unity: first"
+
+        _ = await parser.consume(
+            Data((first + "\n").utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+        let staleGeneration = await parser.currentGeneration()
+
+        let secondEmitted = await parser.consume(
+            Data("08-11 12:00:00.124  42  43 I Unity: second\n".utf8),
+            receivedAt: FixtureFactory.referenceDate
+        )
+
+        let staleFlush = await parser.flushPending(since: staleGeneration)
+        let tail = await parser.finish(receivedAt: FixtureFactory.referenceDate)
+
+        XCTAssertEqual(secondEmitted.map(\.message), ["first"])
+        XCTAssertTrue(staleFlush.isEmpty)
+        XCTAssertEqual(tail.map(\.message), ["second"])
     }
 
     func testMapsEveryThreadtimePriority() async {

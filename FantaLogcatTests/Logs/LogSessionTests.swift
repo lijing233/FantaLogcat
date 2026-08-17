@@ -19,7 +19,7 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.androidTag, "Unity")
         XCTAssertEqual(events.first?.message, "engine ready")
-        XCTAssertEqual(runtime.lastCommand, .logcatThreadtime(device.serial, pids: []))
+        XCTAssertEqual(runtime.lastCommand, .logcatThreadtime(device.serial))
     }
 
     func testRecentEventsParsesBoundedSnapshotBeforeLiveStream() async throws {
@@ -38,7 +38,7 @@ final class LogSessionTests: XCTestCase {
 
         XCTAssertEqual(events.map(\.message), ["previous warning"])
         XCTAssertEqual(events.map(\.priority), [.warning])
-        XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial, pids: [1234], lineCount: 500))
+        XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial))
     }
 
 
@@ -64,9 +64,13 @@ final class LogSessionTests: XCTestCase {
         XCTAssertEqual(event?.message, "sent")
     }
 
-    func testKeywordEventsUseDeviceSideLineBufferedGrep() async throws {
+    func testEventsFiltersByMultiplePIDsOnTheHost() async throws {
         let runtime = StreamingADBRuntime(outputs: [
-            .stdout(Data("08-12 10:00:01.123  1234  1234 D Android.revenueToMMP: sent\n".utf8))
+            .stdout(Data(
+                ("08-12 10:00:01.123  1234  1234 D Unity: main\n"
+                 + "08-12 10:00:01.124  5678  5678 D Unity: child\n"
+                 + "08-12 10:00:01.125  9999  9999 D Unity: other\n").utf8
+            ))
         ])
         let session = LogSession(adb: runtime)
         let device = DeviceDescriptor(
@@ -75,18 +79,38 @@ final class LogSessionTests: XCTestCase {
             transport: .usb
         )
 
-        let events = try await session.events(
-            on: device,
-            pids: [1234],
-            startingID: 1,
-            deviceFilterTerms: ["revenueToMMP", "Withdraw"]
-        ).collect()
+        let events = try await session.events(on: device, pids: [1234, 5678]).collect()
 
-        XCTAssertEqual(events.map(\.message), ["sent"])
-        XCTAssertEqual(
-            runtime.lastCommand,
-            .filteredLogcatThreadtime(device.serial, pids: [1234], terms: ["revenueToMMP", "Withdraw"])
+        XCTAssertEqual(events.map(\.message), ["main", "child"])
+    }
+
+    func testEventsFinishesWithErrorWhenADBExitsNonZero() async throws {
+        let runtime = StreamingADBRuntime(outputs: [
+            .stdout(Data("08-12 10:00:01.123  1234  1234 D Unity: ready\n".utf8)),
+            .stderr(Data("logcat: failure\n".utf8)),
+            .exited(1)
+        ])
+        let session = LogSession(adb: runtime)
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("SERIAL"),
+            displayName: "Pixel",
+            transport: .usb
         )
+
+        var received: [LogEvent] = []
+        do {
+            for try await event in try session.events(on: device, pids: [1234]) {
+                received.append(event)
+            }
+            XCTFail("Expected the stream to throw a non-zero exit error")
+        } catch let error as LogSessionError {
+            guard case .processExitedNonZero(let exitCode, _) = error else {
+                return XCTFail("Unexpected LogSessionError: \(error)")
+            }
+            XCTAssertEqual(exitCode, 1)
+        }
+
+        XCTAssertEqual(received.map(\.message), ["ready"])
     }
 
     private func waitUntil(

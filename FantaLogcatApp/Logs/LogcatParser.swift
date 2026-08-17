@@ -48,6 +48,7 @@ actor LogcatParser {
     private var byteRemainder = Data()
     private var nextID: UInt64 = 1
     private var pending: PendingEvent?
+    private var consumeGeneration: UInt64 = 0
 
     init(
         calendar: Calendar = .current,
@@ -63,6 +64,7 @@ actor LogcatParser {
     }
 
     func consume(_ data: Data, receivedAt: Date) -> [LogEvent] {
+        consumeGeneration &+= 1
         byteRemainder.append(data)
         var emitted: [LogEvent] = []
 
@@ -105,10 +107,22 @@ actor LogcatParser {
     /// Emits the completed line currently being held for a possible stack-trace
     /// continuation. Live log streams call this after a short idle interval so
     /// a final log line does not wait indefinitely for the next ADB output.
-    func flushPending() -> [LogEvent] {
+    ///
+    /// The `since` generation prevents an idle flush scheduled for an earlier
+    /// chunk from publishing a pending event that a newer `consume` has already
+    /// replaced. `consume` advances the generation, so a stale flush becomes a
+    /// no-op instead of racing the live consumption.
+    func flushPending(since generation: UInt64) -> [LogEvent] {
+        guard generation == consumeGeneration else { return [] }
         guard let pending else { return [] }
         self.pending = nil
         return [pending.event]
+    }
+
+    /// Returns the monotonically increasing generation advanced on each
+    /// `consume`, used to keep idle flushes serialized with live parsing.
+    func currentGeneration() -> UInt64 {
+        consumeGeneration
     }
 
     private func process(_ line: String, receivedAt: Date, into emitted: inout [LogEvent]) {

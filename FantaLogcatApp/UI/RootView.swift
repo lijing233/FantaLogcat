@@ -12,6 +12,19 @@ struct RootView: View {
                 DeviceSelectionView()
             case .selectingApp:
                 AppSelectionView()
+            case .toolbox:
+                if let service = model.adbToolService,
+                   let scrcpy = model.scrcpyManager,
+                   let device = model.selectedDevice {
+                    ADBToolboxView(
+                        service: service,
+                        scrcpy: scrcpy,
+                        device: device,
+                        apps: model.availableApps
+                    )
+                } else {
+                    AppSelectionView()
+                }
             case .viewingLogs:
                 LogView()
             }

@@ -4,6 +4,7 @@ enum AppPhase: Equatable {
     case preparingADB
     case selectingDevice
     case selectingApp
+    case toolbox
     case viewingLogs
 }
 
@@ -28,6 +29,13 @@ final class AppModel: ObservableObject {
         case install
     }
 
+    private enum LogStreamOutcome: Sendable {
+        case streamEnded
+        case pidsChanged
+        case cancelled
+        case failed(String)
+    }
+
     @Published private(set) var phase: AppPhase = .preparingADB
     @Published private(set) var adbPreparation: ADBPreparationState = .checking
     @Published private(set) var deviceConnection: DeviceConnectionState = .scanning
@@ -49,10 +57,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var pendingLogEventCount = 0
     @Published var isShowingSettings = false
     @Published private(set) var settings: AppSettings
+    @Published private(set) var appearancePreview: AppAppearance?
+
+    private(set) var adbToolService: ADBToolService?
+    private(set) var scrcpyManager: ScrcpyManager?
 
     var language: AppLanguage { settings.language }
+    var appearance: AppAppearance { settings.appearance }
+    var effectiveAppearance: AppAppearance { appearancePreview ?? appearance }
     var captureSettings: LogCaptureSettings { settings.capture }
-    var isUsingDeviceKeywordFilter: Bool { logFilter.hasKeyword }
+
+    private var defaultDevicePhase: AppPhase {
+        settings.defaultDeviceDestination == .toolbox ? .toolbox : .selectingApp
+    }
 
     let environment: AppEnvironment
     private var adbInstaller: (any ADBInstalling)?
@@ -83,6 +100,7 @@ final class AppModel: ObservableObject {
         self.environment = environment
         cacheLimitsOverride = cacheLimits
         self.settings = settings
+        appearancePreview = nil
         logBuffer = LogRingBuffer(limits: cacheLimits ?? settings.capture.cacheLimits)
         self.keywordStore = keywordStore
         savedKeywords = keywordStore.keywords
@@ -104,7 +122,7 @@ final class AppModel: ObservableObject {
                 phase = .selectingDevice
             }
         } catch {
-            adbPreparation = .failed(errorCode(error))
+            adbPreparation = .failed(Self.errorCode(error))
         }
     }
 
@@ -123,7 +141,7 @@ final class AppModel: ObservableObject {
             phase = .selectingDevice
             await refreshDevices()
         } catch {
-            adbPreparation = .failed(errorCode(error))
+            adbPreparation = .failed(Self.errorCode(error))
         }
     }
 
@@ -148,7 +166,7 @@ final class AppModel: ObservableObject {
             applyDeviceConnection(state)
             startDeviceMonitoringIfNeeded()
         } catch {
-            applyDeviceConnection(.failed(errorCode(error)))
+            applyDeviceConnection(.failed(Self.errorCode(error)))
             startDeviceMonitoringIfNeeded()
         }
     }
@@ -158,7 +176,7 @@ final class AppModel: ObservableObject {
         do {
             applyDeviceConnection(try await deviceService.refresh())
         } catch {
-            applyDeviceConnection(.failed(errorCode(error)))
+            applyDeviceConnection(.failed(Self.errorCode(error)))
         }
     }
 
@@ -166,12 +184,14 @@ final class AppModel: ObservableObject {
         guard phase == .selectingDevice else { return }
         selectedDevice = device
         deviceConnection = .connected(device)
-        phase = .selectingApp
+        phase = defaultDevicePhase
         Task { await loadApps() }
     }
 
     func loadApps() async {
-        guard phase == .selectingApp, let selectedDevice, !isLoadingApps else { return }
+        guard phase == .selectingApp || phase == .toolbox,
+              let selectedDevice,
+              !isLoadingApps else { return }
         guard let appCatalog else { return }
         isLoadingApps = true
         defer { isLoadingApps = false }
@@ -192,6 +212,14 @@ final class AppModel: ObservableObject {
         settings = value
     }
 
+    func previewAppearance(_ appearance: AppAppearance) {
+        appearancePreview = appearance
+    }
+
+    func endAppearancePreview() {
+        appearancePreview = nil
+    }
+
     func copy(_ chinese: String, _ english: String) -> String {
         language == .chinese ? chinese : english
     }
@@ -208,7 +236,25 @@ final class AppModel: ObservableObject {
         isLogStreaming = false
         logCaptureState = .waitingForAppLaunch
         phase = .viewingLogs
-        startLogCapture(for: app, on: selectedDevice, loadingHistory: true)
+        startLogCapture(for: app, on: selectedDevice)
+    }
+
+    func recordRecentApp(_ app: AppDescriptor) {
+        appSelectionStore.recordRecent(app.packageName.value)
+        refreshAppSections()
+    }
+
+    func openToolbox() {
+        guard selectedDevice != nil,
+              adbToolService != nil,
+              scrcpyManager != nil else { return }
+        phase = .toolbox
+        Task { await loadApps() }
+    }
+
+    func closeToolbox() {
+        guard phase == .toolbox else { return }
+        phase = .selectingApp
     }
 
     func returnToAppSelection() {
@@ -233,20 +279,13 @@ final class AppModel: ObservableObject {
     }
 
     func setLogKeyword(_ keyword: String) {
-        let previousTerms = logFilter.deviceGrepTerms
         logFilter.keyword = keyword
         rebuildFilteredLogEvents()
-        guard previousTerms != logFilter.deviceGrepTerms else { return }
-        restartLogCaptureForFilterChange()
     }
 
     func clearLogFilters() {
-        let wasUsingDeviceFilter = logFilter.hasKeyword
         logFilter = LogFilter()
         rebuildFilteredLogEvents()
-        if wasUsingDeviceFilter {
-            restartLogCaptureForFilterChange()
-        }
     }
 
     func pauseLogPresentation() {
@@ -291,100 +330,178 @@ final class AppModel: ObservableObject {
 
     private func startLogCapture(
         for app: AppDescriptor,
-        on selectedDevice: DeviceDescriptor,
-        loadingHistory: Bool
+        on selectedDevice: DeviceDescriptor
     ) {
         guard let appCatalog, let logSession else { return }
         logCaptureGeneration &+= 1
         let generation = logCaptureGeneration
         logTask = Task { [weak self] in
-            var shouldLoadHistory = loadingHistory
-            while !Task.isCancelled {
-                let pids: [Int32]
+            await self?.runLogCaptureLoop(
+                app: app,
+                device: selectedDevice,
+                appCatalog: appCatalog,
+                logSession: logSession,
+                generation: generation
+            )
+        }
+    }
+
+    private func runLogCaptureLoop(
+        app: AppDescriptor,
+        device: DeviceDescriptor,
+        appCatalog: any AppCatalogProtocol,
+        logSession: any LogSessionProtocol,
+        generation: UInt64
+    ) async {
+        var historyLoadedPIDs = Set<Int32>()
+        var retryAttempt = 0
+        let backoffDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(5), .seconds(10)]
+
+        while !Task.isCancelled {
+            let pids: [Int32]
+            do {
+                pids = try await appCatalog.resolveProcesses(
+                    packageName: app.packageName,
+                    on: device
+                ).map(\.pid)
+            } catch {
+                logStreamError = Self.errorCode(error)
+                logCaptureState = .stopped
+                return
+            }
+
+            guard !pids.isEmpty else {
+                isLogStreaming = false
+                logCaptureState = .waitingForAppLaunch
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+
+            let pidsNeedingHistory = pids.filter { !historyLoadedPIDs.contains($0) }
+            if !pidsNeedingHistory.isEmpty {
+                logCaptureState = .loadingRecentLogs
+                if await loadRecentLogs(on: device, pids: pidsNeedingHistory, logSession: logSession) {
+                    historyLoadedPIDs.formUnion(pidsNeedingHistory)
+                }
+            }
+
+            guard logCaptureGeneration == generation else { return }
+
+            switch await streamLogs(
+                app: app,
+                device: device,
+                pids: pids,
+                appCatalog: appCatalog,
+                logSession: logSession,
+                generation: generation
+            ) {
+            case .streamEnded:
+                retryAttempt = 0
+                isLogStreaming = false
+                logCaptureState = .waitingForAppLaunch
+                try? await Task.sleep(for: .milliseconds(500))
+            case .pidsChanged:
+                retryAttempt = 0
+                isLogStreaming = false
+            case .cancelled:
+                return
+            case .failed(let code):
+                await flushPendingLogEvents()
+                await monitorDeviceConnection()
+                guard logCaptureGeneration == generation, phase == .viewingLogs else { return }
+                isLogStreaming = false
+                logCaptureState = .waitingForAppLaunch
+                logStreamError = code
+                let delay = backoffDelays[min(retryAttempt, backoffDelays.count - 1)]
+                retryAttempt += 1
                 do {
-                    pids = try await appCatalog.resolveProcesses(
-                        packageName: app.packageName,
-                        on: selectedDevice
-                    ).map(\.pid)
+                    try await Task.sleep(for: delay)
                 } catch {
-                    self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
-                    self?.logCaptureState = .stopped
                     return
                 }
-
-                guard !pids.isEmpty else {
-                    self?.isLogStreaming = false
-                    self?.logCaptureState = .waitingForAppLaunch
-                    try? await Task.sleep(for: .seconds(1))
-                    continue
-                }
-
-                if shouldLoadHistory {
-                    self?.logCaptureState = .loadingRecentLogs
-                    do {
-                        let historyLines = self?.captureSettings.historyLines ?? 0
-                    if historyLines > 0 {
-                        let recentEvents = try await logSession.recentEvents(
-                            on: selectedDevice,
-                            pids: pids,
-                            limit: historyLines
-                        )
-                        guard !Task.isCancelled else { return }
-                        for event in recentEvents {
-                            await self?.appendLogEvent(event)
-                        }
-                        await self?.flushPendingLogEvents()
-                    }
-                    } catch {
-                        self?.logHistoryError = self?.errorCode(error) ?? "unexpected_error"
-                    }
-                    shouldLoadHistory = false
-                }
-
-                do {
-                    guard self?.logCaptureGeneration == generation else { return }
-                    self?.isLogStreaming = true
-                    self?.logCaptureState = .followingLiveLogs
-                    let filterTerms = self?.logFilter.deviceGrepTerms ?? []
-                    let stream = try logSession.events(
-                        on: selectedDevice,
-                        pids: pids,
-                        startingID: 1,
-                        deviceFilterTerms: filterTerms
-                    )
-                    for try await event in stream {
-                        guard !Task.isCancelled, self?.logCaptureGeneration == generation else { return }
-                        await self?.appendLogEvent(event)
-                    }
-                    await self?.flushPendingLogEvents()
-                    self?.isLogStreaming = false
-                    self?.logCaptureState = .waitingForAppLaunch
-                    try? await Task.sleep(for: .milliseconds(500))
-                } catch is CancellationError {
-                    return
-                } catch {
-                    await self?.flushPendingLogEvents()
-                    await self?.monitorDeviceConnection()
-                    guard self?.phase == .viewingLogs else { return }
-                    self?.logStreamError = self?.errorCode(error) ?? "unexpected_error"
-                    self?.isLogStreaming = false
-                    self?.logCaptureState = .stopped
-                    return
-                }
+                guard logCaptureGeneration == generation else { return }
+                logStreamError = nil
             }
         }
     }
 
-    private func restartLogCaptureForFilterChange() {
-        guard phase == .viewingLogs,
-              let selectedApp,
-              let selectedDevice else { return }
-        logTask?.cancel()
-        logTask = nil
-        isLogStreaming = false
-        logStreamError = nil
-        logCaptureState = .waitingForAppLaunch
-        startLogCapture(for: selectedApp, on: selectedDevice, loadingHistory: false)
+    private func loadRecentLogs(
+        on device: DeviceDescriptor,
+        pids: [Int32],
+        logSession: any LogSessionProtocol
+    ) async -> Bool {
+        let historyLines = captureSettings.historyLines
+        guard historyLines > 0 else { return true }
+        do {
+            let recentEvents = try await logSession.recentEvents(
+                on: device,
+                pids: pids,
+                limit: historyLines
+            )
+            guard !Task.isCancelled else { return false }
+            for event in recentEvents {
+                await appendLogEvent(event)
+            }
+            await flushPendingLogEvents()
+            return true
+        } catch {
+            logHistoryError = Self.errorCode(error)
+            return false
+        }
+    }
+
+    private func streamLogs(
+        app: AppDescriptor,
+        device: DeviceDescriptor,
+        pids: [Int32],
+        appCatalog: any AppCatalogProtocol,
+        logSession: any LogSessionProtocol,
+        generation: UInt64
+    ) async -> LogStreamOutcome {
+        isLogStreaming = true
+        logCaptureState = .followingLiveLogs
+
+        return await withTaskGroup(of: LogStreamOutcome.self) { group -> LogStreamOutcome in
+            group.addTask { [weak self] in
+                do {
+                    let stream = try logSession.events(on: device, pids: pids, startingID: 1)
+                    for try await event in stream {
+                        try Task.checkCancellation()
+                        await self?.appendStreamEvent(event, generation: generation)
+                    }
+                    return .streamEnded
+                } catch is CancellationError {
+                    return .cancelled
+                } catch {
+                    return .failed(Self.errorCode(error))
+                }
+            }
+
+            group.addTask {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(2))
+                    if Task.isCancelled { return .cancelled }
+                    let freshPIDs: [Int32]
+                    do {
+                        freshPIDs = try await appCatalog.resolveProcesses(
+                            packageName: app.packageName,
+                            on: device
+                        ).map(\.pid)
+                    } catch {
+                        continue
+                    }
+                    if Task.isCancelled { return .cancelled }
+                    if Set(freshPIDs) != Set(pids) {
+                        return .pidsChanged
+                    }
+                }
+                return .cancelled
+            }
+
+            let first = await group.next() ?? .cancelled
+            group.cancelAll()
+            return first
+        }
     }
 
     private func resolveInstaller() throws -> any ADBInstalling {
@@ -403,6 +520,17 @@ final class AppModel: ObservableObject {
         }
         if logSession == nil {
             logSession = environment.makeLogSession(installation)
+        }
+        if adbToolService == nil {
+            adbToolService = ADBToolService(adb: ADBRuntime(
+                executableURL: installation.executableURL,
+                runner: FoundationProcessRunner()
+            ))
+        }
+        if scrcpyManager == nil {
+            scrcpyManager = try? ScrcpyManager.production(
+                adbURL: installation.executableURL
+            )
         }
     }
 
@@ -423,13 +551,13 @@ final class AppModel: ObservableObject {
         case .connected(let device):
             selectedDevice = device
             if phase == .selectingDevice {
-                phase = .selectingApp
+                phase = defaultDevicePhase
                 Task { await loadApps() }
             }
         case .scanning:
             break
         case .noDevice, .authorizationRequired, .selectionRequired, .offline, .failed:
-            guard phase == .selectingApp || phase == .viewingLogs else { return }
+            guard phase == .selectingApp || phase == .toolbox || phase == .viewingLogs else { return }
             logTask?.cancel()
             logTask = nil
             isLogStreaming = false
@@ -439,6 +567,11 @@ final class AppModel: ObservableObject {
             selectedApp = nil
             phase = .selectingDevice
         }
+    }
+
+    private func appendStreamEvent(_ event: LogEvent, generation: UInt64) async {
+        guard logCaptureGeneration == generation else { return }
+        await appendLogEvent(event)
     }
 
     private func appendLogEvent(_ event: LogEvent) async {
@@ -489,13 +622,12 @@ final class AppModel: ObservableObject {
         let eviction = await logBuffer.append(events)
         if isLogPresentationPaused {
             pendingLogEventCount += events.count
-        } else {
-            if eviction.evictedEvents == 0 {
-                logEvents.append(contentsOf: events)
-            } else {
-                logEvents = await logBuffer.snapshot(.all).events
-            }
+        } else if eviction.evictedEvents == 0 {
+            logEvents.append(contentsOf: events)
             filteredLogEvents.append(contentsOf: events.filter(logFilter.matches))
+        } else {
+            logEvents = await logBuffer.snapshot(.all).events
+            filteredLogEvents = logFilter.apply(logEvents)
         }
     }
 
@@ -524,8 +656,41 @@ final class AppModel: ObservableObject {
         favoriteApps = preferences.favoritePackageNames.compactMap { appsByPackage[$0] }
     }
 
-    private func errorCode(_ error: Error) -> String {
-        (error as? ADBInstallerError)?.code ?? "unexpected_error"
+    private nonisolated static func errorCode(_ error: Error) -> String {
+        switch error {
+        case let error as ADBError:
+            switch error {
+            case .commandFailed(let exitCode, _):
+                return "adb_error_\(exitCode)"
+            }
+        case let error as ProcessRunnerError:
+            switch error {
+            case .timedOut: return "process_timeout"
+            case .outputBufferOverflow: return "output_buffer_overflow"
+            }
+        case let error as LogSessionError:
+            switch error {
+            case .processExitedNonZero(let exitCode, _):
+                return "logcat_exited_\(exitCode)"
+            }
+        case let error as ADBInstallerError:
+            return error.code
+        case let error as ADBValidationError:
+            switch error {
+            case .invalidEndpoint: return "invalid_endpoint"
+            case .invalidDeviceSerial: return "invalid_device_serial"
+            case .invalidPackageName: return "invalid_package_name"
+            case .invalidPairingCode: return "invalid_pairing_code"
+            case .invalidDeepLink: return "invalid_deep_link"
+            case .invalidActivityComponent: return "invalid_activity_component"
+            case .invalidInputText: return "invalid_input_text"
+            case .invalidJSON: return "invalid_json"
+            case .invalidAPK: return "invalid_apk"
+            case .invalidScreenshot: return "invalid_screenshot"
+            }
+        default:
+            return "unexpected_error"
+        }
     }
 
     private var isFailed: Bool {

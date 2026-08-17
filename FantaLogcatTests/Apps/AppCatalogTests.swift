@@ -47,6 +47,26 @@ final class AppCatalogTests: XCTestCase {
         XCTAssertEqual(processes.map(\.pid), [42, 43])
     }
 
+    func testPIDResolutionFallsBackToPidOfWhenPSIsUnavailable() async throws {
+        let catalog = AppCatalog(adb: StubAppADB(
+            packages: [],
+            processOutput: "",
+            processError: ADBError.commandFailed(exitCode: 1, stderrSummary: "bad -o"),
+            pidOfOutput: "84 42\n"
+        ))
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"), displayName: "Pixel 8", transport: .usb
+        )
+
+        let processes = try await catalog.resolveProcesses(
+            packageName: try AndroidPackageName("com.game.tile"),
+            on: device
+        )
+
+        XCTAssertEqual(processes.map(\.pid), [42, 84])
+        XCTAssertEqual(processes.map(\.name), ["com.game.tile", "com.game.tile"])
+    }
+
     func testGenericAppUsesPackageNameWithoutExtraADBLabelLookup() async throws {
         let catalog = AppCatalog(adb: StubAppADB(
             packages: ["com.game.tile"],
@@ -66,15 +86,21 @@ final class AppCatalogTests: XCTestCase {
 private struct StubAppADB: ADBRuntimeProtocol {
     let packages: [String]
     let processOutput: String
+    let processError: Error?
+    let pidOfOutput: String
     let applicationLabels: [String: String]
 
     init(
         packages: [String],
         processOutput: String,
+        processError: Error? = nil,
+        pidOfOutput: String = "",
         applicationLabels: [String: String] = [:]
     ) {
         self.packages = packages
         self.processOutput = processOutput
+        self.processError = processError
+        self.pidOfOutput = pidOfOutput
         self.applicationLabels = applicationLabels
     }
 
@@ -83,7 +109,10 @@ private struct StubAppADB: ADBRuntimeProtocol {
         case .listThirdPartyPackages:
             return .success(stdout: packages.map { "package:\($0)" }.joined(separator: "\n"))
         case .resolvePIDs:
+            if let processError { throw processError }
             return .success(stdout: processOutput)
+        case .pidOf:
+            return .success(stdout: pidOfOutput)
         case .applicationLabel(_, let packageName):
             return .success(stdout: applicationLabels[packageName.value].map { "application-label:'\($0)'" } ?? "")
         default:

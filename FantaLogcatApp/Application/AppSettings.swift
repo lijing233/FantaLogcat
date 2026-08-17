@@ -1,13 +1,73 @@
 import Foundation
 
+enum AppAppearance: String, Codable, CaseIterable, Identifiable, Sendable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+}
+
+enum DefaultDeviceDestination: String, Codable, CaseIterable, Identifiable, Sendable {
+    case logs
+    case toolbox
+
+    var id: String { rawValue }
+}
+
 struct AppSettings: Codable, Equatable, Sendable {
     static let storageKey = "io.github.fantalogcat.app-settings.v1"
 
     var language: AppLanguage
+    var appearance: AppAppearance
+    var defaultDeviceDestination: DefaultDeviceDestination
     var capture: LogCaptureSettings
 
+    init(
+        language: AppLanguage,
+        appearance: AppAppearance = .system,
+        defaultDeviceDestination: DefaultDeviceDestination = .logs,
+        capture: LogCaptureSettings
+    ) {
+        self.language = language
+        self.appearance = appearance
+        self.defaultDeviceDestination = defaultDeviceDestination
+        self.capture = capture
+    }
+
     var normalized: AppSettings {
-        AppSettings(language: language, capture: capture.normalized)
+        AppSettings(
+            language: language,
+            appearance: appearance,
+            defaultDeviceDestination: defaultDeviceDestination,
+            capture: capture.normalized
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case language
+        case appearance
+        case defaultDeviceDestination
+        case capture
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        language = try container.decode(AppLanguage.self, forKey: .language)
+        appearance = try container.decodeIfPresent(AppAppearance.self, forKey: .appearance) ?? .system
+        defaultDeviceDestination = try container.decodeIfPresent(
+            DefaultDeviceDestination.self,
+            forKey: .defaultDeviceDestination
+        ) ?? .logs
+        capture = try container.decode(LogCaptureSettings.self, forKey: .capture)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(language, forKey: .language)
+        try container.encode(appearance, forKey: .appearance)
+        try container.encode(defaultDeviceDestination, forKey: .defaultDeviceDestination)
+        try container.encode(capture, forKey: .capture)
     }
 }
 

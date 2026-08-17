@@ -5,6 +5,97 @@ enum ADBValidationError: Error, Equatable {
     case invalidDeviceSerial
     case invalidPackageName
     case invalidPairingCode
+    case invalidDeepLink
+    case invalidActivityComponent
+    case invalidInputText
+    case invalidJSON
+    case invalidAPK
+    case invalidScreenshot
+}
+
+struct ADBDeepLink: Sendable, Equatable {
+    let value: String
+
+    init(_ value: String) throws {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.utf8.count <= 4_096,
+              !trimmed.isEmpty,
+              trimmed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              let components = URLComponents(string: trimmed),
+              components.scheme?.isEmpty == false else {
+            throw ADBValidationError.invalidDeepLink
+        }
+        self.value = trimmed
+    }
+}
+
+struct ADBInputText: Sendable, Equatable {
+    let value: String
+
+    init(_ value: String) throws {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,_@:/+=-")
+        guard !value.isEmpty,
+              value.utf8.count <= 1_000,
+              value.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
+            throw ADBValidationError.invalidInputText
+        }
+        self.value = value
+    }
+
+    var inputArgument: String {
+        value.replacingOccurrences(of: " ", with: "%s")
+    }
+}
+
+struct ADBJSONText: Sendable, Equatable {
+    let value: String
+
+    init(_ value: String) throws {
+        guard let data = value.data(using: .utf8),
+              data.count <= 10_000,
+              let object = try? JSONSerialization.jsonObject(with: data),
+              object is [String: Any] || object is [Any],
+              JSONSerialization.isValidJSONObject(object),
+              let normalized = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(data: normalized, encoding: .utf8) else {
+            throw ADBValidationError.invalidJSON
+        }
+        self.value = Self.asciiEscaped(text)
+    }
+
+    var base64: String {
+        Data(value.utf8).base64EncodedString()
+    }
+
+    private static func asciiEscaped(_ value: String) -> String {
+        value.unicodeScalars.map { scalar in
+            guard !scalar.isASCII else { return String(scalar) }
+            let codePoint = scalar.value
+            if codePoint <= 0xFFFF {
+                return String(format: "\\u%04X", codePoint)
+            }
+            let supplementary = codePoint - 0x1_0000
+            let high = 0xD800 + (supplementary >> 10)
+            let low = 0xDC00 + (supplementary & 0x3FF)
+            return String(format: "\\u%04X\\u%04X", high, low)
+        }
+        .joined()
+    }
+}
+
+struct APKInstallOptions: Sendable, Equatable {
+    var replaceExisting = true
+    var allowTestPackages = false
+    var grantRuntimePermissions = false
+    var allowDowngrade = false
+}
+
+enum AndroidDeviceProperty: String, Sendable, Equatable {
+    case manufacturer = "ro.product.manufacturer"
+    case model = "ro.product.model"
+    case androidVersion = "ro.build.version.release"
+    case sdk = "ro.build.version.sdk"
+    case abi = "ro.product.cpu.abi"
 }
 
 struct ADBEndpoint: Sendable, Equatable {
@@ -85,12 +176,31 @@ enum ADBCommand: Sendable, Equatable {
     case connect(ADBEndpoint)
     case disconnect(ADBEndpoint?)
     case listThirdPartyPackages(ADBDeviceSerial)
+    case listThirdPartyPackagePaths(ADBDeviceSerial)
     case applicationLabel(ADBDeviceSerial, AndroidPackageName)
     case resolvePIDs(ADBDeviceSerial, AndroidPackageName)
+    case pidOf(ADBDeviceSerial, AndroidPackageName)
     case startApplication(ADBDeviceSerial, AndroidPackageName)
-    case logcatSnapshotThreadtime(ADBDeviceSerial, pids: [Int32], lineCount: Int)
-    case logcatThreadtime(ADBDeviceSerial, pids: [Int32])
-    case filteredLogcatThreadtime(ADBDeviceSerial, pids: [Int32], terms: [String])
+    case stopApplication(ADBDeviceSerial, AndroidPackageName)
+    case clearApplicationData(ADBDeviceSerial, AndroidPackageName)
+    case installAPK(ADBDeviceSerial, URL, APKInstallOptions)
+    case applicationDetails(ADBDeviceSerial, AndroidPackageName)
+    case openDeepLink(ADBDeviceSerial, ADBDeepLink, AndroidPackageName?)
+    case currentActivity(ADBDeviceSerial)
+    case openActivity(ADBDeviceSerial, AndroidActivityComponent)
+    case openActivityAsPackage(ADBDeviceSerial, AndroidActivityComponent)
+    case inputText(ADBDeviceSerial, ADBInputText)
+    case inputJSON(ADBDeviceSerial, ADBJSONText)
+    case inputKeyEvent(ADBDeviceSerial, Int)
+    case screenshot(ADBDeviceSerial)
+    case deviceProperty(ADBDeviceSerial, AndroidDeviceProperty)
+    case screenSize(ADBDeviceSerial)
+    case screenDensity(ADBDeviceSerial)
+    case batteryDetails(ADBDeviceSerial)
+    case dataStorage(ADBDeviceSerial)
+    case advertisingID(ADBDeviceSerial)
+    case logcatSnapshotThreadtime(ADBDeviceSerial)
+    case logcatThreadtime(ADBDeviceSerial)
 
     var arguments: [String] {
         return switch self {
@@ -106,6 +216,8 @@ enum ADBCommand: Sendable, Equatable {
             endpoint.map { ["disconnect", $0.argument] } ?? ["disconnect"]
         case .listThirdPartyPackages(let serial):
             ["-s", serial.value, "shell", "pm", "list", "packages", "-3"]
+        case .listThirdPartyPackagePaths(let serial):
+            ["-s", serial.value, "shell", "pm", "list", "packages", "-3", "-f"]
         case .applicationLabel(let serial, let package):
             [
                 "-s", serial.value, "shell",
@@ -113,51 +225,77 @@ enum ADBCommand: Sendable, Equatable {
             ]
         case .resolvePIDs(let serial, _):
             ["-s", serial.value, "shell", "ps", "-A", "-o", "PID,NAME"]
+        case .pidOf(let serial, let package):
+            ["-s", serial.value, "shell", "pidof", package.value]
         case .startApplication(let serial, let package):
             ["-s", serial.value, "shell", "monkey", "-p", package.value,
              "-c", "android.intent.category.LAUNCHER", "1"]
-        case .logcatSnapshotThreadtime(let serial, let pids, let lineCount):
-            ["-s", serial.value, "logcat", "-d", "-t", "\(min(max(lineCount, 1), 500))", "-v", "threadtime"]
-                + pids.map { "--pid=\($0)" }
-        case .logcatThreadtime(let serial, let pids):
+        case .stopApplication(let serial, let package):
+            ["-s", serial.value, "shell", "am", "force-stop", package.value]
+        case .clearApplicationData(let serial, let package):
+            ["-s", serial.value, "shell", "pm", "clear", package.value]
+        case .installAPK(let serial, let fileURL, let options):
+            ["-s", serial.value, "install"]
+                + (options.replaceExisting ? ["-r"] : [])
+                + (options.allowTestPackages ? ["-t"] : [])
+                + (options.grantRuntimePermissions ? ["-g"] : [])
+                + (options.allowDowngrade ? ["-d"] : [])
+                + [fileURL.path]
+        case .applicationDetails(let serial, let package):
+            ["-s", serial.value, "shell", "dumpsys", "package", package.value]
+        case .openDeepLink(let serial, let deepLink, let package):
+            ["-s", serial.value, "shell", "am", "start", "-W", "-a",
+             "android.intent.action.VIEW", "-d", Self.shellQuoted(deepLink.value)]
+                + (package.map { ["-p", $0.value] } ?? [])
+        case .currentActivity(let serial):
+            ["-s", serial.value, "shell", "dumpsys", "activity", "activities"]
+        case .openActivity(let serial, let component):
+            ["-s", serial.value, "shell", "am", "start", "-W", "-n", component.value]
+        case .openActivityAsPackage(let serial, let component):
+            [
+                "-s", serial.value, "shell", "run-as", component.packageName.value,
+                "am", "start", "-W", "-n", component.value
+            ]
+        case .inputText(let serial, let text):
+            ["-s", serial.value, "shell", "input", "text", text.inputArgument]
+        case .inputJSON(let serial, let json):
+            [
+                "-s", serial.value, "shell",
+                "payload=\(json.base64); decoded=$(printf %s \"$payload\" | base64 -d) || exit 1; input text \"$decoded\""
+            ]
+        case .inputKeyEvent(let serial, let keyCode):
+            ["-s", serial.value, "shell", "input", "keyevent", String(keyCode)]
+        case .screenshot(let serial):
+            ["-s", serial.value, "exec-out", "screencap", "-p"]
+        case .deviceProperty(let serial, let property):
+            ["-s", serial.value, "shell", "getprop", property.rawValue]
+        case .screenSize(let serial):
+            ["-s", serial.value, "shell", "wm", "size"]
+        case .screenDensity(let serial):
+            ["-s", serial.value, "shell", "wm", "density"]
+        case .batteryDetails(let serial):
+            ["-s", serial.value, "shell", "dumpsys", "battery"]
+        case .dataStorage(let serial):
+            ["-s", serial.value, "shell", "df", "-h", "/data"]
+        case .advertisingID(let serial):
+            ["-s", serial.value, "shell", "settings", "get", "secure", "advertising_id"]
+        case .logcatSnapshotThreadtime(let serial):
+            // `logcat --pid` accepts a single PID, so a multi-process package
+            // cannot be filtered on the device. Dump the full threadtime buffer
+            // and filter by PID on the host instead.
+            ["-s", serial.value, "logcat", "-d", "-v", "threadtime"]
+        case .logcatThreadtime(let serial):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
-                + pids.map { "--pid=\($0)" }
-        case .filteredLogcatThreadtime(let serial, let pids, let terms):
-            Self.filteredLogcatArguments(serial: serial, pids: pids, terms: terms)
         }
-    }
-
-    private static func filteredLogcatArguments(
-        serial: ADBDeviceSerial,
-        pids: [Int32],
-        terms: [String]
-    ) -> [String] {
-        // Android's `logcat --pid` accepts one PID. Repeating the option for a
-        // multi-process package can leave only one process selected, which drops
-        // logs from the package's main process. Filter the threadtime rows in
-        // the shell instead, before applying the keyword grep.
-        let logcat = "logcat -v threadtime"
-        let pidFilter: String
-        if pids.isEmpty {
-            pidFilter = ""
-        } else {
-            let pidPattern = pids
-                .map(String.init)
-                .sorted()
-                .joined(separator: "|")
-            pidFilter = " | grep --line-buffered -E '^[0-9][0-9]-[0-9][0-9][[:space:]][0-9:.]+[[:space:]]+(\(pidPattern))[[:space:]]'"
-        }
-        let grep = terms.map { "-e \(shellQuoted($0))" }.joined(separator: " ")
-        return ["-s", serial.value, "shell", "\(logcat)\(pidFilter) | grep --line-buffered -F -i \(grep)"]
-    }
-
-    private static func shellQuoted(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
     }
 
     var sensitiveValues: [String] {
         guard case .pair(_, let code) = self else { return [] }
         return [code.value]
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
 }

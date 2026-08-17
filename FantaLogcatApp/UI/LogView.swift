@@ -6,6 +6,7 @@ struct LogView: View {
     private let levels = LogPriority.allCases.filter { $0 != .unknown }
     @State private var isShowingExportSheet = false
     @State private var searchBuilder = LogSearchBuilder()
+    @State private var isAtBottom = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -205,12 +206,15 @@ struct LogView: View {
                             LogRow(event: event, highlightTerms: model.logFilter.highlightTerms)
                             Divider().opacity(0.45)
                         }
-                        Color.clear.frame(height: 1).id("log-bottom")
+                        Color.clear.frame(height: 1)
+                            .id("log-bottom")
+                            .onAppear { isAtBottom = true }
+                            .onDisappear { isAtBottom = false }
                     }
                 }
                 .onAppear { scrollToLatest(proxy) }
                 .onChange(of: model.filteredLogEvents.count) { _ in
-                    guard !model.isLogPresentationPaused else { return }
+                    guard !model.isLogPresentationPaused, isAtBottom else { return }
                     scrollToLatest(proxy)
                 }
             }
@@ -370,18 +374,12 @@ struct LogSearchEditor: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if model.isUsingDeviceKeywordFilter {
-                Label(
-                    copy("实时匹配流：设备端 grep 按行输出，结果会优先显示；复杂条件仍由本地完成最终判断。", "Live match stream: device-side grep emits each line immediately; complex queries are finalized locally."),
-                    systemImage: "bolt.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.tint)
-            } else {
-                Text(copy("完整日志流：采集目标应用全部日志并保留历史；新日志采用增量筛选，不会反复扫描全部缓存。", "Full log stream: all target-app logs are retained; new logs are filtered incrementally without rescanning the cache."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(copy(
+                "完整日志流：采集目标应用全部进程的日志并保留历史；关键词与级别在本地按完整事件筛选，多行堆栈不会被截断。",
+                "Full log stream: all logs from the app's processes are retained; keywords and levels are matched locally on complete events, so multi-line stack traces are never truncated."
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             if !model.savedKeywords.isEmpty {
                 LazyVGrid(columns: savedKeywordColumns, alignment: .leading, spacing: 7) {
