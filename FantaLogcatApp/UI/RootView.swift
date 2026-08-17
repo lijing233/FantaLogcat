@@ -38,6 +38,9 @@ struct RootView: View {
             SettingsView(initialDraft: model.settingsDraft)
                 .environmentObject(model)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UpdateInstallationCoordinator.willInstallNotification)) { _ in
+            model.isShowingSettings = false
+        }
     }
 }
 

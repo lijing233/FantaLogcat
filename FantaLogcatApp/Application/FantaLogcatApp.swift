@@ -1,5 +1,14 @@
 import SwiftUI
 
+final class FantaLogcatApplicationDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for sheet in sender.windows.compactMap(\.attachedSheet) {
+            sheet.sheetParent?.endSheet(sheet, returnCode: .cancel)
+        }
+        return .terminateNow
+    }
+}
+
 @main
 struct FantaLogcatApp: App {
     private enum LaunchSurface: Equatable {
@@ -11,11 +20,14 @@ struct FantaLogcatApp: App {
     private static let uiTestingDefaultsSuite = "io.github.fantalogcat.ui-testing"
 
     private let launchSurface: LaunchSurface
+    @NSApplicationDelegateAdaptor(FantaLogcatApplicationDelegate.self) private var applicationDelegate
     @StateObject private var model: AppModel
     @StateObject private var updateController: UpdateController
 
     init() {
-        let arguments = Set(ProcessInfo.processInfo.arguments)
+        let processInfo = ProcessInfo.processInfo
+        let arguments = Set(processInfo.arguments)
+        let isRunningTests = processInfo.environment["XCTestConfigurationFilePath"] != nil
         let surface: LaunchSurface
         if arguments.contains("--ui-testing-settings") {
             surface = .settings
@@ -27,7 +39,9 @@ struct FantaLogcatApp: App {
 
         launchSurface = surface
         _updateController = StateObject(
-            wrappedValue: UpdateController(startingUpdater: surface == .production)
+            wrappedValue: UpdateController(
+                startingUpdater: surface == .production && !isRunningTests
+            )
         )
 
         switch surface {
