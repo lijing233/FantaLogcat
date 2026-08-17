@@ -79,7 +79,7 @@ NSString(string: "安装 FantaLogcat").draw(
     in: NSRect(x: 80, y: 366, width: 600, height: 34),
     withAttributes: titleAttributes
 )
-NSString(string: "拖入 Applications；首次打开受阻时，使用下方快捷入口").draw(
+NSString(string: "将左侧应用拖到右侧 Applications 文件夹").draw(
     in: NSRect(x: 80, y: 338, width: 600, height: 24),
     withAttributes: subtitleAttributes
 )

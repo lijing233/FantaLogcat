@@ -3,30 +3,26 @@
     <channel>
         <title>FantaLogcat</title>
         <item>
-            <title>1.0.10</title>
-            <pubDate>Mon, 17 Aug 2026 20:44:42 +0800</pubDate>
+            <title>1.0.11</title>
+            <pubDate>Mon, 17 Aug 2026 21:01:08 +0800</pubDate>
             <link>https://lijing233.github.io/FantaLogcat/</link>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>1.0.10</sparkle:shortVersionString>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>1.0.11</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# FantaLogcat 1.0.10
+            <description sparkle:format="markdown"><![CDATA[# FantaLogcat 1.0.11
 
-## 重要修复
+## 安装体验
 
-- 修复 1.0.9 在 ad-hoc 签名环境中启动时被 macOS Library Validation 拒绝加载 Sparkle.framework、导致应用立即崩溃的问题。
-- 发布流程新增真实应用启动冒烟测试，可捕获 `codesign --verify` 无法发现的 dyld 运行时加载错误。
+- 移除 DMG 内无法可靠打开系统设置的“打开隐私与安全性”快捷入口。
+- 恢复简洁的双图标安装界面，只保留 FantaLogcat 和 Applications，避免快捷入口破坏布局。
+- Gatekeeper 拦截时，请手动进入“系统设置 → 隐私与安全性”并点击“仍要打开”。
 
 ## 自动更新
 
-- 保留 Sparkle 2.9.4、EdDSA 更新包签名、自动检查和手动“检查更新”功能。
-- 1.0.9 无法正常启动，因此需要手动安装一次 1.0.10；之后可通过应用内更新获取新版本。
-
-## 安装说明
-
-- 当前应用仍为 ad-hoc 签名且未经 Apple 公证。首次安装时请在 Finder 中右键 FantaLogcat 并选择“打开”；如果仍被阻止，可使用 DMG 内的“打开隐私与安全性”快捷入口，再点击“仍要打开”。
+- 本版本继续使用 Sparkle 2.9.4 和 EdDSA 签名分发，可由已安装的 1.0.10 直接检测并安装，用于验证应用内自动更新流程。
 ]]></description>
-            <enclosure url="https://github.com/lijing233/FantaLogcat/releases/download/v1.0.10/FantaLogcat-macos-arm64.zip" length="5027147" type="application/octet-stream" sparkle:edSignature="WMpbhdLeHt7QTag8iyM4fouYsYWoH01tZPbJkD3e4m08CdkcCMsYnX1oEm1HZdBb24RJyN1nZ6fFRdZ2cOe+Cg=="/>
+            <enclosure url="https://github.com/lijing233/FantaLogcat/releases/download/v1.0.11/FantaLogcat-macos-arm64.zip" length="5027150" type="application/octet-stream" sparkle:edSignature="ewdCgyTIxuZ6LM4O7GByPZ5B4zDYcOUZJl5Dwdb7Bkjq7c425V+F03UBSytTt4OWbX72xFj/nR9NqzRMYwKeBA=="/>
         </item>
     </channel>
 </rss>
