@@ -38,7 +38,56 @@ final class LogSessionTests: XCTestCase {
 
         XCTAssertEqual(events.map(\.message), ["previous warning"])
         XCTAssertEqual(events.map(\.priority), [.warning])
-        XCTAssertEqual(runtime.lastRunCommand, .logcatSnapshotThreadtime(device.serial))
+        XCTAssertEqual(
+            runtime.lastRunCommand,
+            .logcatSnapshotThreadtime(device.serial, lineLimit: 500 * LogSession.snapshotLineMultiplier)
+        )
+    }
+
+    func testRecentEventsFallsBackToFullSnapshotWhenBoundedTailIsSaturated() async throws {
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("SERIAL"),
+            displayName: "Pixel",
+            transport: .usb
+        )
+        let lineLimit = 2 * LogSession.snapshotLineMultiplier
+        let noiseLine = "08-12 10:00:01.123  5678  5678 D Other: noise\n"
+        let boundedStdout = Data(String(repeating: noiseLine, count: lineLimit).utf8)
+        let fullStdout = Data(
+            (String(repeating: noiseLine, count: lineLimit)
+                + "08-12 10:00:02.000  1234  1234 D Unity: target\n").utf8
+        )
+        let runtime = FallbackSnapshotADBRuntime(boundedStdout: boundedStdout, fullStdout: fullStdout)
+        let session = LogSession(adb: runtime)
+
+        let events = try await session.recentEvents(on: device, pids: [1234], limit: 2)
+
+        XCTAssertEqual(events.map(\.message), ["target"])
+        let commands = await runtime.runCommands
+        XCTAssertEqual(commands.count, 2)
+    }
+
+    func testRecentEventsSkipsFullFallbackWhenBoundedTailAlreadyHasEnoughMatches() async throws {
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("SERIAL"),
+            displayName: "Pixel",
+            transport: .usb
+        )
+        let lineLimit = 2 * LogSession.snapshotLineMultiplier
+        let noiseLine = "08-12 10:00:01.123  5678  5678 D Other: noise\n"
+        let targetLine = "08-12 10:00:02.000  1234  1234 D Unity: target\n"
+        let boundedStdout = Data(
+            (String(repeating: noiseLine, count: lineLimit - 2)
+                + targetLine + targetLine).utf8
+        )
+        let runtime = FallbackSnapshotADBRuntime(boundedStdout: boundedStdout, fullStdout: Data())
+        let session = LogSession(adb: runtime)
+
+        let events = try await session.recentEvents(on: device, pids: [1234], limit: 2)
+
+        XCTAssertEqual(events.map(\.message), ["target", "target"])
+        let commands = await runtime.runCommands
+        XCTAssertEqual(commands.count, 1)
     }
 
 
@@ -183,6 +232,37 @@ private final class IdleStreamingADBRuntime: ADBRuntimeProtocol, @unchecked Send
 
     func emit(_ output: ProcessOutput) {
         _ = lock.withLock { continuation?.yield(output) }
+    }
+}
+
+private final class FallbackSnapshotADBRuntime: ADBRuntimeProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var commands: [ADBCommand] = []
+    private let boundedStdout: Data
+    private let fullStdout: Data
+
+    init(boundedStdout: Data, fullStdout: Data) {
+        self.boundedStdout = boundedStdout
+        self.fullStdout = fullStdout
+    }
+
+    var runCommands: [ADBCommand] {
+        lock.withLock { commands }
+    }
+
+    func run(_ command: ADBCommand, timeout: Duration) async throws -> ProcessResult {
+        lock.withLock { commands.append(command) }
+        let stdout: Data
+        if case .logcatSnapshotThreadtime(_, let lineLimit) = command, lineLimit != nil {
+            stdout = boundedStdout
+        } else {
+            stdout = fullStdout
+        }
+        return ProcessResult(exitCode: 0, stdout: stdout, stderr: Data())
+    }
+
+    func stream(_ command: ADBCommand) throws -> AsyncThrowingStream<ProcessOutput, Error> {
+        AsyncThrowingStream { $0.finish() }
     }
 }
 

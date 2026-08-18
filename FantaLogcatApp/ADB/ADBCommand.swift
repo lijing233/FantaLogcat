@@ -199,7 +199,7 @@ enum ADBCommand: Sendable, Equatable {
     case batteryDetails(ADBDeviceSerial)
     case dataStorage(ADBDeviceSerial)
     case advertisingID(ADBDeviceSerial)
-    case logcatSnapshotThreadtime(ADBDeviceSerial)
+    case logcatSnapshotThreadtime(ADBDeviceSerial, lineLimit: Int?)
     case logcatThreadtime(ADBDeviceSerial)
 
     var arguments: [String] {
@@ -279,11 +279,14 @@ enum ADBCommand: Sendable, Equatable {
             ["-s", serial.value, "shell", "df", "-h", "/data"]
         case .advertisingID(let serial):
             ["-s", serial.value, "shell", "settings", "get", "secure", "advertising_id"]
-        case .logcatSnapshotThreadtime(let serial):
+        case .logcatSnapshotThreadtime(let serial, let lineLimit):
             // `logcat --pid` accepts a single PID, so a multi-process package
-            // cannot be filtered on the device. Dump the full threadtime buffer
-            // and filter by PID on the host instead.
-            ["-s", serial.value, "logcat", "-d", "-v", "threadtime"]
+            // cannot be filtered on the device. Dump a bounded threadtime tail
+            // (or the full buffer when lineLimit is nil) and filter by PID on
+            // the host instead.
+            ["-s", serial.value, "logcat", "-d"]
+                + (lineLimit.map { ["-t", String($0)] } ?? [])
+                + ["-v", "threadtime"]
         case .logcatThreadtime(let serial):
             ["-s", serial.value, "logcat", "-v", "threadtime"]
         }

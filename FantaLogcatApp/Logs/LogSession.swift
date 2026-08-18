@@ -44,6 +44,9 @@ extension LogSessionProtocol {
 struct LogSession: LogSessionProtocol, Sendable {
     private static let liveEventIdleFlushDelay = Duration.milliseconds(80)
     private static let maximumCapturedStderrBytes = 4_096
+    /// 近期日志按目标进程过滤，而设备端只能按全局行数限量，因此用倍率放大，
+    /// 兼顾高噪声设备上仍能取回目标进程的近期日志。
+    static let snapshotLineMultiplier = 8
     private let adb: any ADBRuntimeProtocol
 
     init(adb: any ADBRuntimeProtocol) {
@@ -56,16 +59,35 @@ struct LogSession: LogSessionProtocol, Sendable {
         limit: Int
     ) async throws -> [LogEvent] {
         guard limit > 0 else { return [] }
+        let lineLimit = limit * Self.snapshotLineMultiplier
+        let bounded = try await snapshotEvents(on: device, pids: pids, lineLimit: lineLimit)
+        // 已取足目标进程日志，或限量行数未触顶（缓冲区已完整覆盖）时直接返回，
+        // 避免在活跃应用 + 高噪声设备上做无谓的全量抓取。
+        if bounded.events.count >= limit || bounded.rawLineCount < lineLimit {
+            return Array(bounded.events.suffix(limit))
+        }
+        // 既未取足又触顶：限量可能截断了目标进程更早的日志，回退完整 dump 兜底。
+        let full = try await snapshotEvents(on: device, pids: pids, lineLimit: nil)
+        return Array(full.events.suffix(limit))
+    }
+
+    private func snapshotEvents(
+        on device: DeviceDescriptor,
+        pids: [Int32],
+        lineLimit: Int?
+    ) async throws -> (events: [LogEvent], rawLineCount: Int) {
         let result = try await adb.run(
-            .logcatSnapshotThreadtime(device.serial),
+            .logcatSnapshotThreadtime(device.serial, lineLimit: lineLimit),
             timeout: .seconds(5)
         )
+        let rawLineCount = result.stdout.reduce(into: 0) { count, byte in
+            if byte == 0x0A { count += 1 }
+        }
         let parser = LogcatParser()
         let receivedAt = Date()
-        var events = await parser.consume(result.stdout, receivedAt: receivedAt)
-        events.append(contentsOf: await parser.finish(receivedAt: receivedAt))
-        let filtered = Self.filteringByPID(events, pids: pids)
-        return Array(filtered.suffix(limit))
+        var parsed = await parser.consume(result.stdout, receivedAt: receivedAt)
+        parsed.append(contentsOf: await parser.finish(receivedAt: receivedAt))
+        return (Self.filteringByPID(parsed, pids: pids), rawLineCount)
     }
 
     func events(

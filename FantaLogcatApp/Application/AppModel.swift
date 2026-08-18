@@ -89,6 +89,10 @@ final class AppModel: ObservableObject {
     private let appSelectionStore: any AppSelectionStoreProtocol
     private let settingsStore: any AppSettingsStore
     private var retryOperation: RetryOperation = .check
+    private var consecutiveDisconnectCount = 0
+
+    private static let devicePollInterval = Duration.seconds(2)
+    private static let disconnectConfirmationThreshold = 2
 
     init(
         environment: AppEnvironment,
@@ -174,9 +178,9 @@ final class AppModel: ObservableObject {
     func monitorDeviceConnection() async {
         guard phase != .preparingADB, let deviceService else { return }
         do {
-            applyDeviceConnection(try await deviceService.refresh())
+            applyMonitoredConnection(try await deviceService.refresh())
         } catch {
-            applyDeviceConnection(.failed(Self.errorCode(error)))
+            applyMonitoredConnection(.failed(Self.errorCode(error)))
         }
     }
 
@@ -184,6 +188,7 @@ final class AppModel: ObservableObject {
         guard phase == .selectingDevice else { return }
         selectedDevice = device
         deviceConnection = .connected(device)
+        consecutiveDisconnectCount = 0
         phase = defaultDevicePhase
         Task { await loadApps() }
     }
@@ -538,7 +543,7 @@ final class AppModel: ObservableObject {
         guard deviceMonitorTask == nil else { return }
         deviceMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: Self.devicePollInterval)
                 guard !Task.isCancelled, let self else { return }
                 await self.monitorDeviceConnection()
             }
@@ -567,6 +572,45 @@ final class AppModel: ObservableObject {
             selectedApp = nil
             phase = .selectingDevice
         }
+    }
+
+    /// 应用监控轮询结果。与用户主动刷新不同，断连需要连续多次确认，
+    /// 避免一次瞬态 `.failed` / `.noDevice` 就把用户从日志或工具箱踢回设备选择页。
+    private func applyMonitoredConnection(_ state: DeviceConnectionState) {
+        switch state {
+        case .connected:
+            consecutiveDisconnectCount = 0
+            applyDeviceConnection(state)
+        case .scanning:
+            return
+        case .selectionRequired(let devices):
+            // 多台在线设备：只要当前选中的设备仍在候选列表中，就维持会话，
+            // 不把新增接入的设备当作断连。
+            if isInActiveSession,
+               let selectedDevice,
+               devices.contains(where: { $0.serial == selectedDevice.serial }) {
+                consecutiveDisconnectCount = 0
+                deviceConnection = .connected(selectedDevice)
+                return
+            }
+            applyDisconnection(state)
+        case .noDevice, .authorizationRequired, .offline, .failed:
+            applyDisconnection(state)
+        }
+    }
+
+    private func applyDisconnection(_ state: DeviceConnectionState) {
+        guard isInActiveSession else {
+            applyDeviceConnection(state)
+            return
+        }
+        consecutiveDisconnectCount += 1
+        guard consecutiveDisconnectCount >= Self.disconnectConfirmationThreshold else { return }
+        applyDeviceConnection(state)
+    }
+
+    private var isInActiveSession: Bool {
+        phase == .selectingApp || phase == .toolbox || phase == .viewingLogs
     }
 
     private func appendStreamEvent(_ event: LogEvent, generation: UInt64) async {
@@ -624,7 +668,12 @@ final class AppModel: ObservableObject {
             pendingLogEventCount += events.count
         } else if eviction.evictedEvents == 0 {
             logEvents.append(contentsOf: events)
-            filteredLogEvents.append(contentsOf: events.filter(logFilter.matches))
+            if logFilter.levels.isEmpty && !logFilter.hasKeyword {
+                filteredLogEvents.append(contentsOf: events)
+            } else {
+                // apply 只计算一次关键词分组，避免每事件重编译正则。
+                filteredLogEvents.append(contentsOf: logFilter.apply(events))
+            }
         } else {
             logEvents = await logBuffer.snapshot(.all).events
             filteredLogEvents = logFilter.apply(logEvents)

@@ -62,7 +62,11 @@ final class ADBRuntimeTests: XCTestCase {
             ["-s", "ABC123", "logcat", "-v", "threadtime"]
         )
         XCTAssertEqual(
-            ADBCommand.logcatSnapshotThreadtime(serial).arguments,
+            ADBCommand.logcatSnapshotThreadtime(serial, lineLimit: 4_000).arguments,
+            ["-s", "ABC123", "logcat", "-d", "-t", "4000", "-v", "threadtime"]
+        )
+        XCTAssertEqual(
+            ADBCommand.logcatSnapshotThreadtime(serial, lineLimit: nil).arguments,
             ["-s", "ABC123", "logcat", "-d", "-v", "threadtime"]
         )
         XCTAssertEqual(

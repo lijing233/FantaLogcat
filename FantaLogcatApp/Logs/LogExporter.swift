@@ -28,15 +28,25 @@ struct LogExporter {
     }()
 
     private static func redactText(_ text: String) -> String {
-        let patterns = [
-            #"(?i)(authorization|token|password|secret|api[_-]?key)\\s*([=:])\\s*[^\\s,;&]+"#,
-            #"(?i)(bearer)\\s+[^\\s,;&]+"#
-        ]
-        return patterns.reduce(text) { result, pattern in
-            guard let expression = try? NSRegularExpression(pattern: pattern) else { return result }
-            let range = NSRange(result.startIndex..<result.endIndex, in: result)
-            return expression.stringByReplacingMatches(in: result, range: range, withTemplate: "$1$2<redacted>")
-        }
+        // Bearer 必须先处理：若先跑 key=value 规则，它会把
+        // "Authorization: Bearer" 中的 "Bearer" 当作值吞掉，留下真正的 token。
+        // 负向前瞻避免对已替换的 "Bearer <token>" 造成二次脱敏。
+        let bearerRedacted = redact(
+            text,
+            pattern: #"(?i)(bearer)\s+[^\s,;&]+"#,
+            template: "$1 <redacted>"
+        )
+        return redact(
+            bearerRedacted,
+            pattern: #"(?i)(authorization|token|password|secret|api[_-]?key)\s*([=:])\s*(?!bearer\b)[^\s,;&]+"#,
+            template: "$1$2<redacted>"
+        )
+    }
+
+    private static func redact(_ text: String, pattern: String, template: String) -> String {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return expression.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }
 }
 

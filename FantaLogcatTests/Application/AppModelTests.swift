@@ -238,7 +238,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .selectingApp)
     }
 
-    func testConnectionMonitorReturnsToDeviceSelectionAndRecoversAutomatically() async throws {
+    func testSingleTransientDisconnectDoesNotReturnToDeviceSelection() async throws {
         let installation = ADBInstallation(
             version: "37.0.0",
             executableURL: URL(fileURLWithPath: "/managed/adb")
@@ -263,6 +263,44 @@ final class AppModelTests: XCTestCase {
         await model.refreshDevices()
         await model.monitorDeviceConnection()
 
+        XCTAssertEqual(model.phase, .selectingApp)
+        XCTAssertEqual(model.selectedDevice, device)
+
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+        XCTAssertEqual(model.selectedDevice, device)
+    }
+
+    func testRepeatedDisconnectsReturnToDeviceSelectionAndRecoverAutomatically() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let service = AppModelSequencedDeviceService(states: [.connected(device), .noDevice, .noDevice, .connected(device)])
+        let model = AppModel(
+            environment: .test(
+                installer: AppModelInstaller(initialState: .ready(installation)),
+                deviceService: service
+            ),
+            settingsStore: InMemoryAppSettingsStore(
+                settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+            )
+        )
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+
+        await model.monitorDeviceConnection()
+
         XCTAssertEqual(model.phase, .selectingDevice)
         XCTAssertEqual(model.deviceConnection, .noDevice)
 
@@ -270,6 +308,46 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.phase, .selectingApp)
         XCTAssertEqual(model.selectedDevice, device)
+    }
+
+    func testSelectionRequiredKeepsSessionWhenSelectedDeviceStillPresent() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let deviceA = DeviceDescriptor(
+            serial: try ADBDeviceSerial("AAAA"),
+            displayName: "Pixel A",
+            transport: .usb
+        )
+        let deviceB = DeviceDescriptor(
+            serial: try ADBDeviceSerial("BBBB"),
+            displayName: "Pixel B",
+            transport: .usb
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .connected(deviceA),
+            .selectionRequired([deviceA, deviceB]),
+            .selectionRequired([deviceA, deviceB])
+        ])
+        let model = AppModel(
+            environment: .test(
+                installer: AppModelInstaller(initialState: .ready(installation)),
+                deviceService: service
+            ),
+            settingsStore: InMemoryAppSettingsStore(
+                settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+            )
+        )
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.monitorDeviceConnection()
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+        XCTAssertEqual(model.selectedDevice, deviceA)
+        XCTAssertEqual(model.deviceConnection, .connected(deviceA))
     }
 
     func testSelectingAppStartsLogStreamAndPublishesEvents() async throws {
