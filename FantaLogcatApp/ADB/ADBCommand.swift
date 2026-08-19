@@ -172,9 +172,14 @@ struct ADBPairingCode: Sendable, Equatable {
 enum ADBCommand: Sendable, Equatable {
     case version
     case devices(longFormat: Bool)
-    case pair(ADBEndpoint, ADBPairingCode)
+    case pair(ADBEndpoint, secret: String)
     case connect(ADBEndpoint)
-    case disconnect(ADBEndpoint?)
+    case disconnect(address: String?)
+    case tcpip(ADBDeviceSerial, port: Int)
+    case usb(ADBDeviceSerial)
+    case mdnsServices
+    case mdnsCheck
+    case killServer
     case listThirdPartyPackages(ADBDeviceSerial)
     case listThirdPartyPackagePaths(ADBDeviceSerial)
     case applicationLabel(ADBDeviceSerial, AndroidPackageName)
@@ -199,6 +204,11 @@ enum ADBCommand: Sendable, Equatable {
     case batteryDetails(ADBDeviceSerial)
     case dataStorage(ADBDeviceSerial)
     case advertisingID(ADBDeviceSerial)
+    case deviceIPAddress(ADBDeviceSerial)
+    case clipboardGetText(ADBDeviceSerial)
+    case clipboardGet(ADBDeviceSerial)
+    case clipboardServiceCall(ADBDeviceSerial)
+    case clipboardDump(ADBDeviceSerial)
     case logcatSnapshotThreadtime(ADBDeviceSerial, lineLimit: Int?)
     case logcatThreadtime(ADBDeviceSerial)
 
@@ -208,12 +218,22 @@ enum ADBCommand: Sendable, Equatable {
             ["version"]
         case .devices(let longFormat):
             longFormat ? ["devices", "-l"] : ["devices"]
-        case .pair(let endpoint, let code):
-            ["pair", endpoint.argument, code.value]
+        case .pair(let endpoint, let secret):
+            ["pair", endpoint.argument, secret]
         case .connect(let endpoint):
             ["connect", endpoint.argument]
-        case .disconnect(let endpoint):
-            endpoint.map { ["disconnect", $0.argument] } ?? ["disconnect"]
+        case .disconnect(let address):
+            address.map { ["disconnect", $0] } ?? ["disconnect"]
+        case .tcpip(let serial, let port):
+            ["-s", serial.value, "tcpip", String(port)]
+        case .usb(let serial):
+            ["-s", serial.value, "usb"]
+        case .mdnsServices:
+            ["mdns", "services"]
+        case .mdnsCheck:
+            ["mdns", "check"]
+        case .killServer:
+            ["kill-server"]
         case .listThirdPartyPackages(let serial):
             ["-s", serial.value, "shell", "pm", "list", "packages", "-3"]
         case .listThirdPartyPackagePaths(let serial):
@@ -279,6 +299,16 @@ enum ADBCommand: Sendable, Equatable {
             ["-s", serial.value, "shell", "df", "-h", "/data"]
         case .advertisingID(let serial):
             ["-s", serial.value, "shell", "settings", "get", "secure", "advertising_id"]
+        case .deviceIPAddress(let serial):
+            ["-s", serial.value, "shell", "ip", "-o", "-f", "inet", "addr", "show"]
+        case .clipboardGetText(let serial):
+            ["-s", serial.value, "shell", "cmd", "clipboard", "get-text"]
+        case .clipboardGet(let serial):
+            ["-s", serial.value, "shell", "cmd", "clipboard", "get"]
+        case .clipboardServiceCall(let serial):
+            ["-s", serial.value, "shell", "service", "call", "clipboard", "2", "s16", "com.android.shell"]
+        case .clipboardDump(let serial):
+            ["-s", serial.value, "shell", "dumpsys", "clipboard"]
         case .logcatSnapshotThreadtime(let serial, let lineLimit):
             // `logcat --pid` accepts a single PID, so a multi-process package
             // cannot be filtered on the device. Dump a bounded threadtime tail
@@ -293,8 +323,8 @@ enum ADBCommand: Sendable, Equatable {
     }
 
     var sensitiveValues: [String] {
-        guard case .pair(_, let code) = self else { return [] }
-        return [code.value]
+        guard case .pair(_, let secret) = self else { return [] }
+        return [secret]
     }
 
     private static func shellQuoted(_ value: String) -> String {

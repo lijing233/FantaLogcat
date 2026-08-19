@@ -350,6 +350,477 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.deviceConnection, .connected(deviceA))
     }
 
+    func testSwitchToDeviceMigratesLogSessionPreservingFilterAndPause() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let usbDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let wirelessDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("192.168.1.5:5555"),
+            displayName: "Pixel 8",
+            transport: .wirelessTCPIP
+        )
+        let app = AppDescriptor(
+            packageName: try AndroidPackageName("com.example.game"),
+            presentation: AppPresentation(displayName: "Example", symbolName: nil, provenance: .generic)
+        )
+        let logSession = AppModelTrackingLogSession()
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(usbDevice)) },
+            makeAppCatalog: { _ in AppModelAppCatalog(apps: [app], processes: [ProcessDescriptor(pid: 42, name: "com.example.game")]) },
+            makeLogSession: { _ in logSession },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.setLogKeyword("Unity")
+        model.selectApp(app)
+        await waitUntil { logSession.streamPIDs.count >= 1 }
+        model.pauseLogPresentation()
+
+        model.switchToDevice(wirelessDevice)
+
+        XCTAssertEqual(model.phase, .viewingLogs)
+        XCTAssertEqual(model.selectedDevice, wirelessDevice)
+        XCTAssertEqual(model.logFilter.keyword, "Unity")
+        XCTAssertTrue(model.isLogPresentationPaused)
+        await waitUntil { logSession.streamPIDs.count >= 2 }
+        XCTAssertEqual(logSession.streamPIDs.count, 2)
+    }
+
+    func testDisconnectWirelessDeviceDisconnectsBySerial() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        // TLS 无线设备序列号为 mDNS 实例名（非 IP:端口），断开必须按序列号原样传递。
+        let wirelessDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("adb-14141FDF600081-TnSdi9"),
+            displayName: "Pixel 8",
+            transport: .wirelessTLS
+        )
+        let wireless = AppModelRecordingWirelessService()
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(wirelessDevice)) },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeWirelessService: { _ in wireless },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.disconnectWirelessDevice()
+
+        let addresses = await wireless.disconnectedAddresses
+        XCTAssertEqual(addresses, ["adb-14141FDF600081-TnSdi9"])
+    }
+
+    func testAdoptWirelessDeviceSelectsNewlyPairedDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let existingDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Existing",
+            transport: .usb
+        )
+        let newDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("adb-14141FDF600081-TnSdi9"),
+            displayName: "Pixel 8",
+            transport: .wirelessTLS
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .connected(existingDevice),
+            .connected(existingDevice),
+            .selectionRequired([existingDevice, newDevice])
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.snapshotKnownDeviceSerials()
+
+        let adopted = await model.adoptWirelessDevice()
+
+        XCTAssertTrue(adopted)
+        XCTAssertEqual(model.selectedDevice, newDevice)
+    }
+
+    func testAdoptWirelessDeviceReturnsFalseWhenNoNewDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let existingDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Existing",
+            transport: .usb
+        )
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(existingDevice)) },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        await model.snapshotKnownDeviceSerials()
+
+        let adopted = await model.adoptWirelessDevice()
+
+        XCTAssertFalse(adopted)
+        XCTAssertEqual(model.selectedDevice, existingDevice)
+    }
+
+    func testSwitchUSBToWirelessSwitchesToNewWirelessDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let usbDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let wirelessDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("192.168.1.5:5555"),
+            displayName: "Pixel 8",
+            transport: .wirelessTCPIP
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .connected(usbDevice),
+            .connected(usbDevice),
+            .connected(wirelessDevice)
+        ])
+        let wireless = AppModelRecordingWirelessService(wifiIP: "192.168.1.5")
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeWirelessService: { _ in wireless },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+
+        let switched = try await model.switchUSBToWireless()
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(model.selectedDevice, wirelessDevice)
+        let ports = await wireless.recordedTCPIPPorts
+        let connects = await wireless.recordedConnects
+        XCTAssertEqual(ports, [5_555])
+        XCTAssertEqual(connects, [try ADBEndpoint(host: "192.168.1.5", port: 5_555)])
+    }
+
+    func testSwitchUSBToWirelessThrowsWhenWifiIPUnavailable() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let usbDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let wireless = AppModelRecordingWirelessService(wifiIP: nil)
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in AppModelDeviceService(state: .connected(usbDevice)) },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeWirelessService: { _ in wireless },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+
+        do {
+            _ = try await model.switchUSBToWireless()
+            XCTFail("Expected wifiIPUnavailable")
+        } catch let error as WirelessDebugError {
+            XCTAssertEqual(error, .wifiIPUnavailable)
+        }
+    }
+
+    func testSwitchProtectionSuppressesTransientDisconnects() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let usbDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .connected(usbDevice),
+            .noDevice, .noDevice, .noDevice, .noDevice
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ), settingsStore: InMemoryAppSettingsStore(
+            settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+        model.beginSwitchProtection()
+
+        await model.monitorDeviceConnection()
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingApp)
+
+        model.endSwitchProtection()
+        await model.monitorDeviceConnection()
+        XCTAssertEqual(model.phase, .selectingApp)
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(model.phase, .selectingDevice)
+    }
+
+    func testAdoptDeviceBySerialSelectsMatchingDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let usbDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("ABC123"),
+            displayName: "Pixel 8",
+            transport: .usb
+        )
+        let wirelessDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("192.168.1.5:5555"),
+            displayName: "Pixel 8",
+            transport: .wirelessTCPIP
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .connected(usbDevice),
+            .selectionRequired([usbDevice, wirelessDevice])
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ), settingsStore: InMemoryAppSettingsStore(
+            settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+        ))
+
+        await model.prepareADB()
+        await model.refreshDevices()
+
+        let adopted = await model.adoptDevice(withSerial: "192.168.1.5:5555")
+
+        XCTAssertTrue(adopted)
+        XCTAssertEqual(model.selectedDevice, wirelessDevice)
+    }
+
+    func testStartupRecoversSavedTCPIPDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let wirelessDevice = DeviceDescriptor(
+            serial: try ADBDeviceSerial("192.168.1.5:5555"),
+            displayName: "Pixel 8",
+            transport: .wirelessTCPIP
+        )
+        let service = AppModelSequencedDeviceService(states: [.noDevice, .connected(wirelessDevice)])
+        let recentStore = InMemoryRecentDeviceConnectionStore(records: [
+            RecentDeviceConnection(
+                serial: "192.168.1.5:5555",
+                displayName: "Pixel 8",
+                transport: .wirelessTCPIP,
+                tcpIPAddress: "192.168.1.5:5555"
+            )
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeWirelessService: { _ in AppModelRecordingWirelessService(wifiIP: "192.168.1.5") },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ), settingsStore: InMemoryAppSettingsStore(
+            settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+        ), recentDeviceStore: recentStore)
+
+        await model.startup()
+        await waitUntil(timeout: .seconds(2)) { model.selectedDevice == wirelessDevice }
+
+        XCTAssertEqual(model.selectedDevice, wirelessDevice)
+        XCTAssertEqual(model.phase, .selectingApp)
+    }
+
+    func testStartupFallsBackWhenSavedTCPIPUnavailable() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let service = AppModelSequencedDeviceService(states: [.noDevice, .noDevice])
+        let recentStore = InMemoryRecentDeviceConnectionStore(records: [
+            RecentDeviceConnection(
+                serial: "192.168.1.5:5555",
+                displayName: "Pixel 8",
+                transport: .wirelessTCPIP,
+                tcpIPAddress: "192.168.1.5:5555"
+            )
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeWirelessService: { _ in AppModelRecordingWirelessService(wifiIP: "192.168.1.5") },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ), settingsStore: InMemoryAppSettingsStore(
+            settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+        ), recentDeviceStore: recentStore)
+
+        await model.startup()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(model.phase, .selectingDevice)
+        XCTAssertNil(model.selectedDevice)
+    }
+
+    func testStartupSelectsLastUsedDeviceAmongMultiple() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let deviceA = DeviceDescriptor(
+            serial: try ADBDeviceSerial("AAAA"),
+            displayName: "Pixel A",
+            transport: .usb
+        )
+        let deviceB = DeviceDescriptor(
+            serial: try ADBDeviceSerial("BBBB"),
+            displayName: "Pixel B",
+            transport: .usb
+        )
+        let service = AppModelSequencedDeviceService(states: [
+            .selectionRequired([deviceA, deviceB])
+        ])
+        let recentStore = InMemoryRecentDeviceConnectionStore(records: [
+            RecentDeviceConnection(serial: "BBBB", displayName: "Pixel B", transport: .usb, lastUsedAt: Date(timeIntervalSince1970: 2)),
+            RecentDeviceConnection(serial: "AAAA", displayName: "Pixel A", transport: .usb, lastUsedAt: Date(timeIntervalSince1970: 1))
+        ])
+        let model = AppModel(environment: AppEnvironment(
+            makeADBInstaller: { AppModelInstaller(initialState: .ready(installation)) },
+            makeDeviceService: { _ in service },
+            makeAppCatalog: { _ in AppModelAppCatalog() },
+            makeLogSession: { _ in AppModelLogSession(events: []) },
+            makeAppSelectionStore: { InMemoryAppSelectionStore() },
+            adbLicenseURL: URL(string: "https://example.com/terms")!
+        ), settingsStore: InMemoryAppSettingsStore(
+            settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+        ), recentDeviceStore: recentStore)
+
+        await model.startup()
+
+        XCTAssertEqual(model.selectedDevice, deviceB)
+    }
+
+    func testRecordingRecentDevicePreservesAutoRestoreSetting() throws {
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("AAAA"),
+            displayName: "Pixel A",
+            transport: .usb
+        )
+        let recentStore = InMemoryRecentDeviceConnectionStore(records: [
+            RecentDeviceConnection(
+                serial: "AAAA",
+                displayName: "Pixel A",
+                transport: .usb,
+                autoRestoreEnabled: false
+            )
+        ])
+        let model = AppModel(
+            environment: .test(),
+            settingsStore: InMemoryAppSettingsStore(
+                settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+            ),
+            recentDeviceStore: recentStore
+        )
+
+        model.switchToDevice(device)
+
+        XCTAssertEqual(recentStore.records.first?.serial, "AAAA")
+        XCTAssertEqual(recentStore.records.first?.autoRestoreEnabled, false)
+    }
+
+    func testMonitorPollDoesNotReRecordRecentDevice() async throws {
+        let installation = ADBInstallation(
+            version: "37.0.0",
+            executableURL: URL(fileURLWithPath: "/managed/adb")
+        )
+        let device = DeviceDescriptor(
+            serial: try ADBDeviceSerial("AAAA"),
+            displayName: "Pixel A",
+            transport: .usb
+        )
+        let service = AppModelDeviceService(state: .connected(device))
+        let recentStore = InMemoryRecentDeviceConnectionStore()
+        let model = AppModel(
+            environment: .test(
+                installer: AppModelInstaller(initialState: .ready(installation)),
+                deviceService: service
+            ),
+            settingsStore: InMemoryAppSettingsStore(
+                settings: .init(language: .chinese, defaultDeviceDestination: .logs, capture: .init())
+            ),
+            recentDeviceStore: recentStore
+        )
+
+        await model.prepareADB()
+        model.selectDevice(device)
+        let recordedAt = recentStore.records.first?.lastUsedAt
+        XCTAssertNotNil(recordedAt)
+
+        await model.monitorDeviceConnection()
+
+        XCTAssertEqual(recentStore.records.first?.lastUsedAt, recordedAt)
+    }
+
     func testSelectingAppStartsLogStreamAndPublishesEvents() async throws {
         let installation = ADBInstallation(
             version: "37.0.0",
@@ -946,6 +1417,57 @@ private final class InMemoryAppSettingsStore: AppSettingsStore, @unchecked Senda
 
 private enum TestSettingsStoreError: Error {
     case failed
+}
+
+private actor AppModelRecordingWirelessService: WirelessDebugServiceProtocol {
+    private let wifiIP: String?
+    private var addresses: [String?] = []
+    private var ports: [Int] = []
+    private var endpoints: [ADBEndpoint] = []
+
+    init(wifiIP: String? = nil) {
+        self.wifiIP = wifiIP
+    }
+
+    var disconnectedAddresses: [String?] { addresses }
+    var recordedTCPIPPorts: [Int] { ports }
+    var recordedConnects: [ADBEndpoint] { endpoints }
+
+    func mDNSAvailable() async -> Bool { false }
+    func discoverPairingEndpoint(serviceName: String) async throws -> ADBEndpoint? { nil }
+    func pair(endpoint: ADBEndpoint, secret: String) async throws {}
+    func connect(endpoint: ADBEndpoint) async throws { endpoints.append(endpoint) }
+    func enableTCPIP(serial: ADBDeviceSerial, port: Int) async throws { ports.append(port) }
+    func restoreUSB(serial: ADBDeviceSerial) async throws {}
+    func disconnect(address: String?) async throws { addresses.append(address) }
+    func restartServer() async throws {}
+    func wifiIPAddress(serial: ADBDeviceSerial) async throws -> String? { wifiIP }
+}
+
+private final class InMemoryRecentDeviceConnectionStore: RecentDeviceConnectionStore, @unchecked Sendable {
+    private var value: [RecentDeviceConnection]
+
+    init(records: [RecentDeviceConnection] = []) {
+        value = records
+    }
+
+    var records: [RecentDeviceConnection] { value }
+
+    func upsert(_ record: RecentDeviceConnection) {
+        value.removeAll { $0.serial == record.serial }
+        value.insert(record, at: 0)
+        value.sort { $0.lastUsedAt > $1.lastUsedAt }
+        value = Array(value.prefix(6))
+    }
+
+    func remove(serial: String) {
+        value.removeAll { $0.serial == serial }
+    }
+
+    func setAutoRestore(_ enabled: Bool, serial: String) {
+        guard let index = value.firstIndex(where: { $0.serial == serial }) else { return }
+        value[index].autoRestoreEnabled = enabled
+    }
 }
 
 private enum AppModelTestError: Error {

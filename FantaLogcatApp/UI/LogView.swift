@@ -52,6 +52,8 @@ struct LogView: View {
                     .foregroundStyle(.secondary)
             }
 
+            CurrentDeviceMenu()
+
             Spacer()
 
             captureStatus

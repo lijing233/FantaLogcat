@@ -44,6 +44,9 @@ struct ADBToolboxView: View {
     @State private var shortcuts = UserDefaultsADBShortcutStore().shortcuts
     @State private var inputText = ""
     @State private var textInputMode: TextInputMode = .text
+    @State private var clipboardContent = ""
+    @State private var clipboardMessage: String?
+    @State private var isReadingClipboard = false
     @State private var jsonValidationMessage: String?
     @State private var pressEnter = false
     @State private var isConfirmingClearData = false
@@ -73,11 +76,11 @@ struct ADBToolboxView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     apkCard
+                    appControlCard
                     scrcpyCard
-                    deepLinkCard
                     textCard
                     screenshotCard
-                    appControlCard
+                    deepLinkCard
                     deviceInfoCard
                 }
                 .padding(.horizontal, 28)
@@ -148,14 +151,10 @@ struct ADBToolboxView: View {
             Image(systemName: "wrench.and.screwdriver.fill")
                 .font(.title2)
                 .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(copy("工具箱", "Toolbox"))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                Text("\(device.displayName) · \(device.serial.value)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
+            Text(copy("工具箱", "Toolbox"))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
             Spacer()
+            CurrentDeviceMenu()
             Button {
                 Task { await model.loadApps() }
             } label: {
@@ -424,6 +423,46 @@ struct ADBToolboxView: View {
                         .foregroundStyle(.green)
                 }
                 feedbackView(.text)
+
+                Divider()
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await readClipboard() }
+                    } label: {
+                        Label {
+                            Text(isReadingClipboard ? copy("正在读取…", "Reading…") : copy("读取手机剪贴板", "Read phone clipboard"))
+                        } icon: {
+                            if isReadingClipboard {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "clipboard")
+                            }
+                        }
+                    }
+                    .controlSize(.regular)
+                    .disabled(isReadingClipboard)
+                    if !clipboardContent.isEmpty {
+                        Button {
+                            copyToPasteboard(clipboardContent)
+                        } label: {
+                            Label(copy("复制", "Copy"), systemImage: "square.on.square")
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                if let clipboardMessage {
+                    Text(clipboardMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if !clipboardContent.isEmpty {
+                    Text(clipboardContent)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
+                }
             }
         }
     }
@@ -932,6 +971,33 @@ struct ADBToolboxView: View {
     private func copyToPasteboard(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func readClipboard() async {
+        isReadingClipboard = true
+        defer { isReadingClipboard = false }
+        clipboardMessage = nil
+        do {
+            let text = try await service.readClipboard(on: device)
+            clipboardContent = text
+            if text.isEmpty {
+                clipboardMessage = copy("剪贴板为空。", "Clipboard is empty.")
+            }
+        } catch {
+            clipboardContent = ""
+            if error as? ADBToolServiceError == .clipboardReadingUnavailable {
+                clipboardMessage = copy(
+                    "当前设备系统未开放 ADB 剪贴板读取；可继续使用上方“粘贴”将 Mac 剪贴板内容发送到设备。",
+                    "This device does not expose clipboard reading to ADB. You can still use Paste above to send Mac clipboard text to the device."
+                )
+            } else if let adbError = error as? ADBError,
+               case .commandFailed(_, let summary) = adbError,
+               !summary.isEmpty {
+                clipboardMessage = copy("命令执行失败：\(summary)", "Command failed: \(summary)")
+            } else {
+                clipboardMessage = copy("命令执行失败：\(String(describing: error))", "Command failed: \(String(describing: error))")
+            }
+        }
     }
 
     private func setFeedback(_ tool: Tool, message: String, isError: Bool) {

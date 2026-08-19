@@ -63,6 +63,7 @@ struct AppSelectionView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            CurrentDeviceMenu()
             Button {
                 model.openToolbox()
             } label: {

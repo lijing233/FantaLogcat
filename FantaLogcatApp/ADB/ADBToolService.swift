@@ -2,6 +2,7 @@ import Foundation
 
 enum ADBToolServiceError: Error, Equatable {
     case activityNotAccessible(String)
+    case clipboardReadingUnavailable
 }
 
 struct APKInstallResult: Sendable, Equatable {
@@ -183,6 +184,140 @@ actor ADBToolService {
             throw ADBValidationError.invalidScreenshot
         }
         return result.stdout
+    }
+
+    /// 读取设备剪贴板文本。不同 Android/OEM 对 shell Clipboard API 的开放程度不同。
+    func readClipboard(on device: DeviceDescriptor) async throws -> String {
+        let commands: [ADBCommand] = [.clipboardGetText(device.serial), .clipboardGet(device.serial)]
+        var lastCommandError: Error?
+        var shellCommandUnsupported = false
+        for command in commands {
+            do {
+                switch try await clipboardShellText(command) {
+                case .text(let text):
+                    return text
+                case .unsupported:
+                    shellCommandUnsupported = true
+                case .diagnostic(let message):
+                    lastCommandError = ADBError.commandFailed(exitCode: 0, stderrSummary: message)
+                }
+            } catch {
+                lastCommandError = error
+            }
+        }
+
+        // dumpsys 在部分旧系统上可读；它不保证包含主剪贴板内容，因此只在明确能解析时采用。
+        do {
+            let dump = try await runText(.clipboardDump(device.serial), timeout: .seconds(10))
+            if let text = Self.clipboardText(inDump: dump) { return text }
+        } catch {
+            lastCommandError = error
+        }
+
+        if shellCommandUnsupported {
+            // Binder transaction 编号会随 Android/OEM 变化，不能把猜测的编号当作通用读取方式。
+            throw ADBToolServiceError.clipboardReadingUnavailable
+        }
+        if let lastCommandError { throw lastCommandError }
+        throw ADBToolServiceError.clipboardReadingUnavailable
+    }
+
+    private enum ClipboardShellText {
+        case text(String)
+        case unsupported
+        case diagnostic(String)
+    }
+
+    /// `cmd clipboard` 在部分厂商系统中会以 0 退出码将“不支持”写到 stderr。
+    /// 只有 stdout 与 stderr 均为空时，才把它视为一个真实的空剪贴板。
+    private func clipboardShellText(_ command: ADBCommand) async throws -> ClipboardShellText {
+        let result = try await adb.run(command, timeout: .seconds(10))
+        let text = String(decoding: result.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let diagnostic = String(decoding: result.stderr, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if diagnostic.localizedCaseInsensitiveContains("no shell command implementation") {
+            return .unsupported
+        }
+        if !text.isEmpty { return .text(text) }
+        if diagnostic.isEmpty { return .text("") }
+        return .diagnostic(diagnostic)
+    }
+
+    private static func clipboardText(inDump dump: String) -> String? {
+        let patterns = [#"(?:mPrimaryClip|primaryClip).*?(?:text|T:)[:=]([^}\n]+)"#, #"ClipData\s*\{[^\n]*T:([^}\n]+)"#]
+        for pattern in patterns {
+            guard let range = dump.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { continue }
+            let matched = String(dump[range])
+            if let separator = matched.lastIndex(where: { $0 == ":" || $0 == "=" }) {
+                let value = matched[matched.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { return String(value) }
+            }
+        }
+        return nil
+    }
+
+    /// 从 `service call clipboard 2` 的 Parcel 十六进制输出中，提取剪贴板文本（UTF-16 解码）。
+    /// Parcel 里还包含 MIME 类型等元数据，因此过滤掉 `text/plain` 这类 MIME 片段，返回最长的剩余文本。
+    static func parseServiceCallClipboard(_ output: String) -> String? {
+        var bytes: [UInt8] = []
+        for line in output.split(whereSeparator: \.isNewline) {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let afterColon = line[line.index(after: colon)...]
+            let hexPart = afterColon.prefix(while: { $0 != "'" })
+            for word in hexPart.split(whereSeparator: \.isWhitespace) {
+                guard word.count == 8, let value = UInt32(word, radix: 16) else { continue }
+                bytes.append(UInt8(value & 0xFF))
+                bytes.append(UInt8((value >> 8) & 0xFF))
+                bytes.append(UInt8((value >> 16) & 0xFF))
+                bytes.append(UInt8((value >> 24) & 0xFF))
+            }
+        }
+        guard bytes.count >= 2 else { return nil }
+
+        // 将字节流按小端 UTF-16 解码，并把连续的可见字符收集成若干“run”。
+        // 代理对合并为单个 Character；NUL 与控制字符作为 run 边界。
+        let units: [UInt16] = stride(from: 0, to: bytes.count - 1, by: 2).map {
+            UInt16(bytes[$0]) | (UInt16(bytes[$0 + 1]) << 8)
+        }
+        var runs: [String] = []
+        var current = ""
+        var index = 0
+        while index < units.count {
+            let unit = units[index]
+            if unit == 0 {
+                if !current.isEmpty { runs.append(current) }
+                current = ""
+                index += 1
+                continue
+            }
+            if (0xD800...0xDBFF).contains(unit), index + 1 < units.count {
+                let next = units[index + 1]
+                if (0xDC00...0xDFFF).contains(next) {
+                    let combined = (UInt32(unit - 0xD800) << 10)
+                        + UInt32(next - 0xDC00) + 0x1_0000
+                    if let scalar = UnicodeScalar(combined) {
+                        current.append(Character(scalar))
+                    }
+                    index += 2
+                    continue
+                }
+            }
+            if (0xD800...0xDFFF).contains(unit) || unit < 0x20 {
+                if !current.isEmpty { runs.append(current) }
+                current = ""
+            } else if let scalar = UnicodeScalar(unit) {
+                current.append(Character(scalar))
+            }
+            index += 1
+        }
+        if !current.isEmpty { runs.append(current) }
+
+        let mimePattern = #"^[a-z]+/[a-z0-9.+_-]+$"#
+        let candidates = runs.filter { run in
+            run.range(of: mimePattern, options: .regularExpression) == nil
+        }
+        return candidates.max(by: { $0.count < $1.count })
     }
 
     func restart(_ package: AndroidPackageName, on device: DeviceDescriptor) async throws {

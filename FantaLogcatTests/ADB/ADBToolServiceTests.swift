@@ -130,6 +130,82 @@ final class ADBToolServiceTests: XCTestCase {
         XCTAssertEqual(info.advertisingID, "12345678-1234-1234-1234-123456789abc")
     }
 
+    func testParseServiceCallClipboardExtractsUTF16Text() {
+        let output = """
+        Result: Parcel(
+          0x00000000: 00000001 00000000 00000000 00000000 '................'
+          0x00000010: 00650048 006c006c 0000006f 00000000 'H.e.l.l.o.......'
+        )
+        """
+
+        XCTAssertEqual(ADBToolService.parseServiceCallClipboard(output), "Hello")
+    }
+
+    func testParseServiceCallClipboardIgnoresMIMEType() {
+        let output = """
+        Result: Parcel(
+          0x00000010: 00650074 00740078 0070002f 0061006c 't.e.x.t./.p.l.a.'
+          0x00000020: 006e0069 00000005 00650048 006c006c 'i.n.....H.e.l.l.'
+          0x00000030: 0000006f 00000000 00000000 00000000 'o...............'
+        )
+        """
+
+        XCTAssertEqual(ADBToolService.parseServiceCallClipboard(output), "Hello")
+    }
+
+    func testParseServiceCallClipboardReturnsNilForEmpty() {
+        XCTAssertNil(ADBToolService.parseServiceCallClipboard("Result: Parcel(\n)"))
+    }
+
+    func testParseServiceCallClipboardDecodesChineseAndEmoji() {
+        // "你好😀" = U+4F60 U+597D U+1F600（代理对 D83D DE00），NUL 结尾。
+        let output = """
+        Result: Parcel(
+          0x00000000: 597d4f60 de00d83d 00000000 00000000 '...'
+        )
+        """
+
+        XCTAssertEqual(ADBToolService.parseServiceCallClipboard(output), "你好😀")
+    }
+
+    func testReadClipboardReturnsEmptyWhenClipboardIsEmpty() async throws {
+        let adb = RecordingToolADB()
+        let service = ADBToolService(adb: adb)
+        let device = try makeDevice()
+
+        let text = try await service.readClipboard(on: device)
+
+        XCTAssertEqual(text, "")
+        let commands = await adb.commands
+        XCTAssertEqual(commands, [.clipboardGetText(device.serial)])
+    }
+
+    func testReadClipboardPropagatesCommandFailureWhenDeviceIsOffline() async throws {
+        let adb = RecordingToolADB(
+            clipboardError: .commandFailed(exitCode: 1, stderrSummary: "device offline")
+        )
+        let service = ADBToolService(adb: adb)
+
+        do {
+            _ = try await service.readClipboard(on: try makeDevice())
+            XCTFail("Expected clipboard read to fail")
+        } catch let error as ADBError {
+            XCTAssertEqual(error, .commandFailed(exitCode: 1, stderrSummary: "device offline"))
+        }
+    }
+
+    func testReadClipboardDoesNotTreatUnsupportedStderrAsEmptyClipboard() async throws {
+        let adb = RecordingToolADB(clipboardStderr: "No shell command implementation.")
+        let service = ADBToolService(adb: adb)
+
+        do {
+            _ = try await service.readClipboard(on: try makeDevice())
+            XCTFail("Expected clipboard reading to be unavailable")
+        } catch let error as ADBToolServiceError {
+            XCTAssertEqual(error, .clipboardReadingUnavailable)
+        }
+    }
+
     private func makeDevice() throws -> DeviceDescriptor {
         DeviceDescriptor(
             serial: try ADBDeviceSerial("DEVICE-1"),
@@ -148,9 +224,17 @@ private actor RecordingToolADB: ADBRuntimeProtocol {
     private(set) var commands: [ADBCommand] = []
     private var packagePathReadCount = 0
     private let overrides: [OverrideKey: Data]
+    private let clipboardError: ADBError?
+    private let clipboardStderr: String?
 
-    init(overrides: [OverrideKey: Data] = [:]) {
+    init(
+        overrides: [OverrideKey: Data] = [:],
+        clipboardError: ADBError? = nil,
+        clipboardStderr: String? = nil
+    ) {
         self.overrides = overrides
+        self.clipboardError = clipboardError
+        self.clipboardStderr = clipboardStderr
     }
 
     func run(_ command: ADBCommand, timeout: Duration) async throws -> ProcessResult {
@@ -160,6 +244,14 @@ private actor RecordingToolADB: ADBRuntimeProtocol {
                 exitCode: 255,
                 stderrSummary: "Security exception: Permission Denial: not exported"
             )
+        }
+        if let clipboardError {
+            switch command {
+            case .clipboardGetText, .clipboardGet, .clipboardServiceCall, .clipboardDump:
+                throw clipboardError
+            default:
+                break
+            }
         }
         let output: Data
         switch command {
@@ -205,7 +297,14 @@ private actor RecordingToolADB: ADBRuntimeProtocol {
         default:
             output = Data()
         }
-        return ProcessResult(exitCode: 0, stdout: output, stderr: Data())
+        let stderr: Data
+        switch command {
+        case .clipboardGetText, .clipboardGet:
+            stderr = Data((clipboardStderr ?? "").utf8)
+        default:
+            stderr = Data()
+        }
+        return ProcessResult(exitCode: 0, stdout: output, stderr: stderr)
     }
 
     nonisolated func stream(

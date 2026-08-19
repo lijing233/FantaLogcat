@@ -38,8 +38,7 @@ struct RootView: View {
         }
         .frame(minWidth: 920, minHeight: 600)
         .task {
-            await model.prepareADB()
-            await model.refreshDevices()
+            await model.startup()
         }
         .onReceive(NotificationCenter.default.publisher(for: UpdateInstallationCoordinator.willInstallNotification)) { _ in
             model.isShowingSettings = false

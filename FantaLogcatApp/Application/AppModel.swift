@@ -22,6 +22,14 @@ enum LogCaptureState: Equatable {
     case stopped
 }
 
+enum ConnectionRecoveryState: Equatable {
+    case idle
+    case discoveringADBDevices
+    case reconnectingSavedTCPIP(String)
+    case waitingForTLSDiscovery
+    case completed
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     private enum RetryOperation {
@@ -58,9 +66,12 @@ final class AppModel: ObservableObject {
     @Published var isShowingSettings = false
     @Published private(set) var settings: AppSettings
     @Published private(set) var appearancePreview: AppAppearance?
+    @Published private(set) var connectionRecoveryState: ConnectionRecoveryState = .idle
+    @Published private(set) var recentDeviceConnections: [RecentDeviceConnection] = []
 
     private(set) var adbToolService: ADBToolService?
     private(set) var scrcpyManager: ScrcpyManager?
+    private(set) var wirelessService: (any WirelessDebugServiceProtocol)?
 
     var language: AppLanguage { settings.language }
     var appearance: AppAppearance { settings.appearance }
@@ -80,6 +91,8 @@ final class AppModel: ObservableObject {
     private var logCaptureGeneration: UInt64 = 0
     private var logFlushTask: Task<Void, Never>?
     private var deviceMonitorTask: Task<Void, Never>?
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryGeneration: UInt64 = 0
     private let cacheLimitsOverride: CacheLimits?
     private var logBuffer: LogRingBuffer
     private var nextLogEventID: UInt64 = 1
@@ -88,8 +101,13 @@ final class AppModel: ObservableObject {
     private let keywordStore: any LogKeywordStoreProtocol
     private let appSelectionStore: any AppSelectionStoreProtocol
     private let settingsStore: any AppSettingsStore
+    private let recentDeviceStore: any RecentDeviceConnectionStore
     private var retryOperation: RetryOperation = .check
     private var consecutiveDisconnectCount = 0
+    private var knownDeviceSerials = Set<String>()
+    private var switchProtectionDeadline: ContinuousClock.Instant?
+    private var preferredWirelessSerial: String?
+    private var preferredWirelessUntil: ContinuousClock.Instant?
 
     private static let devicePollInterval = Duration.seconds(2)
     private static let disconnectConfirmationThreshold = 2
@@ -98,7 +116,8 @@ final class AppModel: ObservableObject {
         environment: AppEnvironment,
         cacheLimits: CacheLimits? = nil,
         keywordStore: any LogKeywordStoreProtocol = UserDefaultsLogKeywordStore(),
-        settingsStore: any AppSettingsStore = UserDefaultsAppSettingsStore()
+        settingsStore: any AppSettingsStore = UserDefaultsAppSettingsStore(),
+        recentDeviceStore: any RecentDeviceConnectionStore = UserDefaultsRecentDeviceConnectionStore()
     ) {
         let settings = settingsStore.settings.normalized
         self.environment = environment
@@ -110,6 +129,8 @@ final class AppModel: ObservableObject {
         savedKeywords = keywordStore.keywords
         appSelectionStore = environment.makeAppSelectionStore()
         self.settingsStore = settingsStore
+        self.recentDeviceStore = recentDeviceStore
+        recentDeviceConnections = recentDeviceStore.records
     }
 
     func prepareADB() async {
@@ -127,6 +148,40 @@ final class AppModel: ObservableObject {
             }
         } catch {
             adbPreparation = .failed(Self.errorCode(error))
+        }
+    }
+
+    /// 启动流程：准备 ADB → 刷新设备（单台直接进入、多台命中最近设备）→ 无设备时后台恢复最近无线连接。
+    func startup() async {
+        await prepareADB()
+        guard phase == .selectingDevice else { return }
+        await refreshDevices()
+        if case .noDevice = deviceConnection {
+            startRecovery(for: nil)
+        }
+    }
+
+    private func recordRecentDevice(_ device: DeviceDescriptor) {
+        // 保留旧记录里用户手动关闭的"自动恢复"开关，避免每次记录都把它重置回开启。
+        let existing = recentDeviceConnections.first(where: { $0.serial == device.serial.value })
+        let record = RecentDeviceConnection(
+            serial: device.serial.value,
+            displayName: device.displayName,
+            transport: device.transport,
+            tcpIPAddress: device.transport == .wirelessTCPIP ? device.serial.value : nil,
+            lastUsedAt: Date(),
+            autoRestoreEnabled: existing?.autoRestoreEnabled ?? true
+        )
+        recentDeviceStore.upsert(record)
+        recentDeviceConnections = recentDeviceStore.records
+    }
+
+    private func autoSelectLastUsedDevice(among devices: [DeviceDescriptor]) {
+        for record in recentDeviceConnections {
+            if let device = devices.first(where: { $0.id == record.serial }) {
+                selectDevice(device)
+                return
+            }
         }
     }
 
@@ -168,6 +223,9 @@ final class AppModel: ObservableObject {
             }
             let state = try await deviceService.refresh()
             applyDeviceConnection(state)
+            if case .selectionRequired(let devices) = state {
+                autoSelectLastUsedDevice(among: devices)
+            }
             startDeviceMonitoringIfNeeded()
         } catch {
             applyDeviceConnection(.failed(Self.errorCode(error)))
@@ -189,6 +247,7 @@ final class AppModel: ObservableObject {
         selectedDevice = device
         deviceConnection = .connected(device)
         consecutiveDisconnectCount = 0
+        recordRecentDevice(device)
         phase = defaultDevicePhase
         Task { await loadApps() }
     }
@@ -537,6 +596,9 @@ final class AppModel: ObservableObject {
                 adbURL: installation.executableURL
             )
         }
+        if wirelessService == nil {
+            wirelessService = environment.makeWirelessService(installation)
+        }
     }
 
     private func startDeviceMonitoringIfNeeded() {
@@ -556,6 +618,9 @@ final class AppModel: ObservableObject {
         case .connected(let device):
             selectedDevice = device
             if phase == .selectingDevice {
+                // 仅首次发现（刷新自动连接）时更新"最近使用"；
+                // 监控轮询期间的重复 `.connected` 不再覆盖记录。
+                recordRecentDevice(device)
                 phase = defaultDevicePhase
                 Task { await loadApps() }
             }
@@ -578,7 +643,18 @@ final class AppModel: ObservableObject {
     /// 避免一次瞬态 `.failed` / `.noDevice` 就把用户从日志或工具箱踢回设备选择页。
     private func applyMonitoredConnection(_ state: DeviceConnectionState) {
         switch state {
-        case .connected:
+        case .connected(let device):
+            // 刚切换到无线后，短暂忽略其它设备（如仍插着的 USB）的抢占覆盖。
+            if let preferred = preferredWirelessSerial,
+               let until = preferredWirelessUntil,
+               ContinuousClock.now < until {
+                if device.serial.value == preferred {
+                    preferredWirelessSerial = nil
+                    preferredWirelessUntil = nil
+                } else {
+                    return
+                }
+            }
             consecutiveDisconnectCount = 0
             applyDeviceConnection(state)
         case .scanning:
@@ -604,13 +680,287 @@ final class AppModel: ObservableObject {
             applyDeviceConnection(state)
             return
         }
+        // 连接切换保护窗口内：忽略 .noDevice/.offline 等瞬态断连，避免 adbd 重启时误跳转设备选择页。
+        if isSwitchProtectionActive {
+            consecutiveDisconnectCount = 0
+            return
+        }
         consecutiveDisconnectCount += 1
         guard consecutiveDisconnectCount >= Self.disconnectConfirmationThreshold else { return }
         applyDeviceConnection(state)
     }
 
+    private var isSwitchProtectionActive: Bool {
+        guard let deadline = switchProtectionDeadline else { return false }
+        return ContinuousClock.now < deadline
+    }
+
+    func beginSwitchProtection(duration: Duration = .seconds(20)) {
+        switchProtectionDeadline = ContinuousClock.now.advanced(by: duration)
+    }
+
+    func endSwitchProtection() {
+        switchProtectionDeadline = nil
+    }
+
     private var isInActiveSession: Bool {
         phase == .selectingApp || phase == .toolbox || phase == .viewingLogs
+    }
+
+    // MARK: - 无线调试
+
+    /// 记录当前已知设备序列号，供配对后识别新增设备。
+    func snapshotKnownDeviceSerials() async {
+        guard let deviceService else { return }
+        if let state = try? await deviceService.refresh() {
+            knownDeviceSerials = Set(Self.devices(in: state).map(\.id))
+        }
+    }
+
+    /// 无线页配对/连接成功后调用：刷新设备并切换到本次新增的无线设备。
+    /// 返回是否实际发现并切换到了新设备；调用方据此决定是否继续轮询等待。
+    @discardableResult
+    func adoptWirelessDevice() async -> Bool {
+        guard let deviceService else { return false }
+        do {
+            let state = try await deviceService.refresh()
+            let devices = Self.devices(in: state)
+            // 只接受配对前不存在的设备，避免多设备时误切到其它无线设备，
+            // 也避免在 mDNS 自动连接尚未完成时把旧设备误判为"已连接无线"。
+            guard let newDevice = devices.first(where: { !knownDeviceSerials.contains($0.id) }) else {
+                return false
+            }
+            switchToDevice(newDevice)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func devices(in state: DeviceConnectionState) -> [DeviceDescriptor] {
+        switch state {
+        case .connected(let device): [device]
+        case .selectionRequired(let devices): devices
+        case .scanning, .noDevice, .authorizationRequired, .offline, .failed: []
+        }
+    }
+
+    /// 切换到指定设备；若正在查看日志，则在保留筛选与暂停状态的前提下重载当前应用日志。
+    func switchToDevice(_ device: DeviceDescriptor) {
+        selectedDevice = device
+        deviceConnection = .connected(device)
+        consecutiveDisconnectCount = 0
+        recordRecentDevice(device)
+        switch phase {
+        case .selectingDevice:
+            phase = defaultDevicePhase
+            Task { await loadApps() }
+        case .viewingLogs:
+            if let app = selectedApp {
+                migrateLogSession(to: device, app: app)
+            }
+        case .selectingApp, .toolbox:
+            // 设备序列号已变化，重新加载应用列表。
+            Task { await loadApps() }
+        case .preparingADB:
+            break
+        }
+    }
+
+    private func migrateLogSession(to device: DeviceDescriptor, app: AppDescriptor) {
+        let paused = isLogPresentationPaused
+        logTask?.cancel()
+        logTask = nil
+        logCaptureGeneration &+= 1
+        resetLogStorage(resetEventIDs: true)
+        isLogPresentationPaused = paused
+        isLogStreaming = false
+        logStreamError = nil
+        logHistoryError = nil
+        logCaptureState = .waitingForAppLaunch
+        startLogCapture(for: app, on: device)
+    }
+
+    func disconnectWirelessDevice() async {
+        guard let wirelessService,
+              let device = selectedDevice,
+              device.transport.isWireless else { return }
+        preferredWirelessSerial = nil
+        preferredWirelessUntil = nil
+        try? await wirelessService.disconnect(address: device.serial.value)
+        await monitorDeviceConnection()
+    }
+
+    func disconnectAllWirelessDevices() async {
+        guard let wirelessService else { return }
+        try? await wirelessService.disconnect(address: nil)
+        await monitorDeviceConnection()
+    }
+
+    func restoreUSB() async {
+        guard let wirelessService, let device = selectedDevice else { return }
+        preferredWirelessSerial = nil
+        preferredWirelessUntil = nil
+        beginSwitchProtection()
+        defer { endSwitchProtection() }
+        try? await wirelessService.restoreUSB(serial: device.serial)
+        await monitorDeviceConnection()
+    }
+
+    func restartADBServer() async {
+        guard let wirelessService else { return }
+        try? await wirelessService.restartServer()
+        await monitorDeviceConnection()
+    }
+
+    /// 一键把当前 USB 设备切换为无线：获取 Wi-Fi IP → tcpip → connect（带重试）→ 切换会话。
+    /// 返回是否已切换成功；失败抛错由调用方展示。wifiIP 为空时自动探测。
+    @discardableResult
+    func switchUSBToWireless(port: Int = 5_555, wifiIP: String? = nil) async throws -> Bool {
+        guard let wirelessService,
+              let device = selectedDevice,
+              device.transport == .usb else {
+            throw WirelessDebugError.usbDeviceRequired
+        }
+        let ip: String
+        if let wifiIP, !wifiIP.isEmpty {
+            ip = wifiIP
+        } else {
+            guard let detected = try await wirelessService.wifiIPAddress(serial: device.serial), !detected.isEmpty else {
+                throw WirelessDebugError.wifiIPUnavailable
+            }
+            ip = detected
+        }
+        // 进入切换流程即开启保护窗口，adbd 重启导致的短暂 noDevice 不会误跳转。
+        beginSwitchProtection(duration: .seconds(30))
+        defer { endSwitchProtection() }
+
+        // tcpip 会让 adbd 异步重启、USB 短暂消失；失败不致命（设备可能已在 TCP 模式）。
+        try? await wirelessService.enableTCPIP(serial: device.serial, port: port)
+
+        let endpoint = try ADBEndpoint(host: ip, port: port)
+        // adbd 重启完成前 connect 会失败，带退避重试直到成功或超时。
+        await connectWithRetry(service: wirelessService, endpoint: endpoint)
+
+        // 轮询等待序列号为 ip:port 的无线设备出现并切换（精确匹配，重连场景也可靠）。
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(15))
+        while clock.now < deadline {
+            if await adoptDeviceAndPin(withSerial: endpoint.argument) { return true }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        return await adoptDeviceAndPin(withSerial: endpoint.argument)
+    }
+
+    /// 按序列号精确选中设备并切换（USB→无线用，序列号即 ip:port）。
+    @discardableResult
+    func adoptDevice(withSerial serial: String) async -> Bool {
+        guard let deviceService else { return false }
+        guard let state = try? await deviceService.refresh() else { return false }
+        let devices = Self.devices(in: state)
+        guard let device = devices.first(where: { $0.id == serial }) else { return false }
+        switchToDevice(device)
+        return true
+    }
+
+    /// 切换成功后短暂固定该无线设备，避免被仍在线的 USB 设备抢占覆盖。
+    private func adoptDeviceAndPin(withSerial serial: String) async -> Bool {
+        guard await adoptDevice(withSerial: serial) else { return false }
+        preferredWirelessSerial = serial
+        preferredWirelessUntil = ContinuousClock.now.advanced(by: .seconds(15))
+        return true
+    }
+
+    /// 带退避重试 connect，容忍 adbd 重启窗口。
+    private func connectWithRetry(
+        service: any WirelessDebugServiceProtocol,
+        endpoint: ADBEndpoint,
+        timeout: Duration = .seconds(12)
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if (try? await service.connect(endpoint: endpoint)) != nil {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(600))
+        }
+    }
+
+    // MARK: - 启动恢复
+
+    /// 后台启动恢复任务：无参数时恢复最近的无线 TCP/IP 记录，有参数时恢复指定记录。
+    /// 每次启动都会推进 generation，旧任务即使随后被取消执行清理，也不会覆盖新任务的状态。
+    func startRecovery(for record: RecentDeviceConnection?) {
+        recoveryTask?.cancel()
+        recoveryGeneration &+= 1
+        let generation = recoveryGeneration
+        recoveryTask = Task { [weak self] in
+            await self?.runRecovery(record: record, generation: generation)
+        }
+    }
+
+    func cancelRecovery() async {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryGeneration &+= 1
+        endSwitchProtection()
+        connectionRecoveryState = .completed
+        await refreshDevices()
+    }
+
+    private func runRecovery(record: RecentDeviceConnection?, generation: UInt64) async {
+        guard generation == recoveryGeneration else { return }
+        connectionRecoveryState = .discoveringADBDevices
+        let target: RecentDeviceConnection?
+        if let record {
+            target = record
+        } else {
+            target = recentDeviceConnections.first(where: {
+                $0.transport == .wirelessTCPIP && $0.autoRestoreEnabled && $0.tcpIPAddress != nil
+            })
+        }
+        guard let target,
+              let address = target.tcpIPAddress,
+              let endpoint = WirelessDebugService.parseAddress(address) else {
+            guard generation == recoveryGeneration else { return }
+            connectionRecoveryState = .completed
+            return
+        }
+        guard generation == recoveryGeneration else { return }
+        connectionRecoveryState = .reconnectingSavedTCPIP(address)
+        beginSwitchProtection(duration: .seconds(8))
+        defer {
+            if generation == recoveryGeneration {
+                endSwitchProtection()
+                connectionRecoveryState = .completed
+            }
+        }
+        await connectAndAdopt(endpoint: endpoint)
+    }
+
+    private func connectAndAdopt(endpoint: ADBEndpoint) async {
+        guard let wirelessService else { return }
+        try? await wirelessService.connect(endpoint: endpoint)
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(6))
+        while clock.now < deadline {
+            if Task.isCancelled { return }
+            if await adoptDevice(withSerial: endpoint.argument) { return }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if Task.isCancelled { return }
+        _ = await adoptDevice(withSerial: endpoint.argument)
+    }
+
+    func removeRecentDevice(serial: String) {
+        recentDeviceStore.remove(serial: serial)
+        recentDeviceConnections = recentDeviceStore.records
+    }
+
+    func setAutoRestore(_ enabled: Bool, serial: String) {
+        recentDeviceStore.setAutoRestore(enabled, serial: serial)
+        recentDeviceConnections = recentDeviceStore.records
     }
 
     private func appendStreamEvent(_ event: LogEvent, generation: UInt64) async {

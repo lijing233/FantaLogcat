@@ -50,8 +50,9 @@ actor DeviceService: DeviceServiceProtocol {
                 ?? (serial.value.hasPrefix("emulator-") ? "Android Emulator" : "Android device")
             let transport: DeviceTransport
             if serial.value.hasPrefix("emulator-") { transport = .emulator }
-            else if serial.value.contains(":") { transport = .wireless }
             else if details["usb"] != nil { transport = .usb }
+            else if serial.value.contains(":") { transport = .wirelessTCPIP } // adb tcpip + adb connect：序列号为 IP:端口
+            else if serial.value.hasPrefix("adb-") { transport = .wirelessTLS } // Android 11+ TLS 无线：mDNS 实例名 adb-<serial>-<random>
             else { transport = .unknown }
             return Record(
                 descriptor: DeviceDescriptor(serial: serial, displayName: displayName, transport: transport),

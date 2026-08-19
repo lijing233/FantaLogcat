@@ -15,7 +15,6 @@ struct SettingsView: View {
     @State private var draft: AppSettings
     @State private var selectedSection: Section = .general
     @State private var saveErrorMessage: String?
-    @State private var didSave = false
     private let onClose: () -> Void
 
     init(initialDraft: AppSettings, onClose: @escaping () -> Void) {
@@ -40,13 +39,8 @@ struct SettingsView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onChange(of: draft.appearance) { appearance in
-            model.previewAppearance(appearance)
-        }
-        .onDisappear {
-            if !didSave {
-                model.endAppearancePreview()
-            }
+        .onChange(of: draft) { _ in
+            persistDraft()
         }
     }
 
@@ -58,18 +52,15 @@ struct SettingsView: View {
             .buttonStyle(.borderless)
             .keyboardShortcut(.cancelAction)
             .accessibilityIdentifier("settings.close")
-            .help(copy("Discard unsaved settings"))
+            .help(copy("关闭设置", "Close settings"))
 
             Text(copy("Settings"))
                 .font(.title2.weight(.bold))
 
             Spacer()
-
-            Button(copy("Save"), action: save)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("settings.save")
-                .help(copy("Save and apply all settings"))
+            Text(copy("更改会立即生效", "Changes apply immediately"))
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
@@ -286,16 +277,13 @@ struct SettingsView: View {
     }
 
     private func close() {
-        model.endAppearancePreview()
         onClose()
     }
 
-    private func save() {
+    private func persistDraft() {
         do {
             try model.saveSettings(draft)
-            didSave = true
-            model.endAppearancePreview()
-            onClose()
+            saveErrorMessage = nil
         } catch {
             saveErrorMessage = draft.language == .chinese
                 ? "设置保存失败，请重试。"

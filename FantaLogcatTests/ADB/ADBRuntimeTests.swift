@@ -28,10 +28,9 @@ final class ADBRuntimeTests: XCTestCase {
             maximumErrorBytes: 128
         )
         let endpoint = try ADBEndpoint(host: "127.0.0.1", port: 5555)
-        let code = try ADBPairingCode("123456")
 
         do {
-            _ = try await runtime.run(.pair(endpoint, code), timeout: .seconds(5))
+            _ = try await runtime.run(.pair(endpoint, secret: "123456"), timeout: .seconds(5))
             XCTFail("Expected command failure")
         } catch let error as ADBError {
             guard case .commandFailed(_, let summary) = error else {
@@ -96,6 +95,51 @@ final class ADBRuntimeTests: XCTestCase {
         XCTAssertEqual(
             ADBCommand.advertisingID(serial).arguments,
             ["-s", "ABC123", "shell", "settings", "get", "secure", "advertising_id"]
+        )
+    }
+
+    func testBuildsWirelessCommandsArguments() throws {
+        let serial = try ADBDeviceSerial("ABC123")
+
+        XCTAssertEqual(
+            ADBCommand.tcpip(serial, port: 5_555).arguments,
+            ["-s", "ABC123", "tcpip", "5555"]
+        )
+        XCTAssertEqual(
+            ADBCommand.usb(serial).arguments,
+            ["-s", "ABC123", "usb"]
+        )
+        XCTAssertEqual(
+            ADBCommand.mdnsServices.arguments,
+            ["mdns", "services"]
+        )
+        XCTAssertEqual(
+            ADBCommand.mdnsCheck.arguments,
+            ["mdns", "check"]
+        )
+        XCTAssertEqual(
+            ADBCommand.killServer.arguments,
+            ["kill-server"]
+        )
+        XCTAssertEqual(
+            ADBCommand.deviceIPAddress(serial).arguments,
+            ["-s", "ABC123", "shell", "ip", "-o", "-f", "inet", "addr", "show"]
+        )
+        XCTAssertEqual(
+            ADBCommand.clipboardGetText(serial).arguments,
+            ["-s", "ABC123", "shell", "cmd", "clipboard", "get-text"]
+        )
+        XCTAssertEqual(
+            ADBCommand.clipboardGet(serial).arguments,
+            ["-s", "ABC123", "shell", "cmd", "clipboard", "get"]
+        )
+        XCTAssertEqual(
+            ADBCommand.clipboardServiceCall(serial).arguments,
+            ["-s", "ABC123", "shell", "service", "call", "clipboard", "2", "s16", "com.android.shell"]
+        )
+        XCTAssertEqual(
+            ADBCommand.clipboardDump(serial).arguments,
+            ["-s", "ABC123", "shell", "dumpsys", "clipboard"]
         )
     }
 

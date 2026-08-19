@@ -42,6 +42,32 @@ final class DeviceServiceTests: XCTestCase {
             .connected(.init(serial: try ADBDeviceSerial("R5CT20A1234"), displayName: "Pixel 8", transport: .usb))
         )
     }
+
+    func testTLSWirelessDeviceIsIdentifiedByMDNSInstanceName() async throws {
+        let adb = StubDeviceADB(output: """
+        List of devices attached
+        adb-14141FDF600081-TnSdi9 device product:husky model:Pixel_8 device:husky transport_id:1
+        """)
+        let state = try await DeviceService(adb: adb).refresh()
+
+        XCTAssertEqual(
+            state,
+            .connected(.init(serial: try ADBDeviceSerial("adb-14141FDF600081-TnSdi9"), displayName: "Pixel 8", transport: .wirelessTLS))
+        )
+    }
+
+    func testTCPIPWirelessDeviceIsIdentifiedByIPPortSerial() async throws {
+        let adb = StubDeviceADB(output: """
+        List of devices attached
+        192.168.1.5:5555 device product:husky model:Pixel_8 device:husky transport_id:1
+        """)
+        let state = try await DeviceService(adb: adb).refresh()
+
+        XCTAssertEqual(
+            state,
+            .connected(.init(serial: try ADBDeviceSerial("192.168.1.5:5555"), displayName: "Pixel 8", transport: .wirelessTCPIP))
+        )
+    }
 }
 
 private struct StubDeviceADB: ADBRuntimeProtocol {

@@ -8,7 +8,7 @@ final class InteractionUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testClosingSettingsDiscardsLanguageChange() {
+    func testChangingSettingsAppliesImmediately() {
         app = XCUIApplication()
         defer { app.terminate() }
         launchSettings(reset: true)
@@ -27,34 +27,6 @@ final class InteractionUITests: XCTestCase {
         let close = app.buttons["settings.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.click()
-
-        XCTAssertTrue(liveLanguage("chinese").waitForExistence(timeout: 5))
-        XCTAssertTrue(liveRedaction("true").waitForExistence(timeout: 5))
-        reopenSettings()
-
-        XCTAssertTrue(waitForLanguage("chinese", in: languagePicker))
-        XCTAssertTrue(redactExportsToggle(true).waitForExistence(timeout: 5))
-    }
-
-    func testSavingSettingsPersistsLanguageChange() {
-        app = XCUIApplication()
-        defer { app.terminate() }
-        launchSettings(reset: true)
-
-        let english = languageOption("settings.language.english")
-        let language = languagePicker
-        XCTAssertTrue(language.waitForExistence(timeout: 5))
-        XCTAssertTrue(english.waitForExistence(timeout: 5))
-        english.click()
-        XCTAssertTrue(waitForLanguage("english", in: language))
-        let redact = redactExportsToggle(true)
-        XCTAssertTrue(redact.waitForExistence(timeout: 5))
-        redact.click()
-        XCTAssertTrue(redactExportsToggle(false).waitForExistence(timeout: 5))
-
-        let save = app.buttons["settings.save"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
-        save.click()
 
         XCTAssertTrue(liveLanguage("english").waitForExistence(timeout: 5))
         XCTAssertTrue(liveRedaction("false").waitForExistence(timeout: 5))
